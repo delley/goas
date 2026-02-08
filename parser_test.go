@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"go/ast"
 	"go/token"
-	"io/ioutil"
+	"os"
+	"regexp"
 	"testing"
 
 	"github.com/jarcoal/httpmock"
@@ -24,7 +25,7 @@ func TestExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := ioutil.ReadFile("./example/example.json")
+	expected, _ := os.ReadFile("./example/example.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
@@ -38,7 +39,7 @@ func TestShowHiddenExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := ioutil.ReadFile("./example/example-show-hidden.json")
+	expected, _ := os.ReadFile("./example/example-show-hidden.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
@@ -448,5 +449,81 @@ func Test_parseOverrideStructTag(t *testing.T) {
 		result := parseOverrideStructTag(ast)
 
 		require.Equal(t, "Test", result)
+	})
+}
+func Test_parseGoMod(t *testing.T) {
+	t.Run("Successfully parses go.mod file", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		err = p.parseGoMod()
+		require.NoError(t, err)
+
+		// Verify that packages were loaded from go.mod
+		require.NotEmpty(t, p.KnownPkgs)
+		require.NotEmpty(t, p.KnownNamePkg)
+		require.NotEmpty(t, p.KnownPathPkg)
+	})
+
+	t.Run("Returns error when go.mod file cannot be read", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		// Set invalid go.mod path
+		p.GoModFilePath = "/nonexistent/go.mod"
+
+		err = p.parseGoMod()
+		require.Error(t, err)
+	})
+
+	t.Run("Handles uppercase characters in module paths", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		err = p.parseGoMod()
+		require.NoError(t, err)
+
+		// Check that uppercase characters are converted to !lowercase format
+		for _, pkg := range p.KnownPkgs {
+			if pkg.Path != "" && pkg.Path != p.ModulePath {
+				// Package paths from go.mod cache should not contain uppercase without ! prefix
+				require.NotRegexp(t, regexp.MustCompile(`[^!][A-Z]`), pkg.Path)
+			}
+		}
+	})
+
+	t.Run("Maps package names to packages correctly", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		err = p.parseGoMod()
+		require.NoError(t, err)
+
+		// Verify bidirectional mapping
+		for _, pkg := range p.KnownPkgs {
+			if pkg.Name != "" {
+				foundByName := p.KnownNamePkg[pkg.Name]
+				require.NotNil(t, foundByName)
+				require.Equal(t, pkg.Name, foundByName.Name)
+			}
+			if pkg.Path != "" {
+				foundByPath := p.KnownPathPkg[pkg.Path]
+				require.NotNil(t, foundByPath)
+				require.Equal(t, pkg.Path, foundByPath.Path)
+			}
+		}
+	})
+
+	t.Run("Skips .git directories", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		err = p.parseGoMod()
+		require.NoError(t, err)
+
+		// Verify no .git paths are included
+		for _, pkg := range p.KnownPkgs {
+			require.NotContains(t, pkg.Path, ".git")
+		}
 	})
 }

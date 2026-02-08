@@ -2,20 +2,19 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"go/ast"
 	goparser "go/parser"
 	"go/token"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +68,10 @@ var (
 	stringType = "string"
 	arrayType  = "array"
 )
+
+func NewParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
+	return newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
+}
 
 func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
 	p := &parser{
@@ -183,9 +186,9 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	p.GoModCachePath = goModCachePath
 	p.debugf("go module cache path: %s", p.GoModCachePath)
 
-	goRoot := runtime.GOROOT()
-	if goRoot == "" {
-		return nil, fmt.Errorf("cannot get GOROOT")
+	goRoot, err := getGoRoot()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get GOROOT: %w", err)
 	}
 	goRootSrcPath := filepath.Join(goRoot, "src")
 	_, err = os.Stat(goRootSrcPath)
@@ -219,6 +222,15 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	}
 
 	return p, nil
+}
+
+func getGoRoot() (string, error) {
+	cmd := exec.Command("go", "env", "GOROOT")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func (p *parser) parse() error {
@@ -332,7 +344,7 @@ func fetchRef(filePath, description string) (string, error) {
 	url := description[5:]
 	if strings.HasPrefix(url, "file://") {
 		descPath := strings.Join([]string{filePath, url[7:]}, "/")
-		dat, err := ioutil.ReadFile(descPath)
+		dat, err := os.ReadFile(descPath)
 		if err != nil {
 			return "", err
 		}
@@ -344,7 +356,7 @@ func fetchRef(filePath, description string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -497,7 +509,7 @@ func (p *parser) parseEntryPoint() error {
 	}
 
 	// Apply security scopes to their security schemes
-	for scheme, _ := range p.OpenAPI.Components.SecuritySchemes {
+	for scheme := range p.OpenAPI.Components.SecuritySchemes {
 		if p.OpenAPI.Components.SecuritySchemes[scheme].Type == "oauth2" {
 			if scopes, ok := oauthScopes[scheme]; ok {
 				p.OpenAPI.Components.SecuritySchemes[scheme].OAuthFlows.ApplyScopes(scopes)
@@ -528,7 +540,7 @@ func parseTags(comment string) (*TagDefinition, error) {
 	re := regexp.MustCompile("\"([^\"]*)\"")
 	matches := re.FindAllStringSubmatch(comment, -1)
 	if len(matches) == 0 || len(matches[0]) == 1 {
-		return nil, fmt.Errorf("Expected: @Tags \"<name>\" [\"<description>\"] Received: %s", comment)
+		return nil, fmt.Errorf("expected: @Tags \"<name>\" [\"<description>\"] received: %s", comment)
 	}
 	tag := TagDefinition{Name: matches[0][1]}
 	if len(matches) > 1 {
@@ -563,12 +575,13 @@ func (p *parser) parseModule() error {
 	filepath.Walk(p.ModulePath, walker)
 	return nil
 }
+
 func fixer(path, version string) (string, error) {
 	return version, nil
 }
 
 func (p *parser) parseGoMod() error {
-	b, err := ioutil.ReadFile(p.GoModFilePath)
+	b, err := os.ReadFile(p.GoModFilePath)
 	if err != nil {
 		return err
 	}
@@ -913,7 +926,7 @@ func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comm
 			}
 
 			if !isInStringList(tagList, resource) && !p.ShowHidden {
-				err = fmt.Errorf("Could not find tag \"%s\" in the main list of tags", resource)
+				err = fmt.Errorf("could not find tag \"%s\" in the main list of tags", resource)
 			} else if !isInStringList(operation.Tags, resource) {
 				operation.Tags = append(operation.Tags, resource)
 			}
@@ -967,7 +980,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 		if operation.RequestBody == nil {
 			operation.RequestBody = &RequestBodyObject{
 				Content: map[string]*MediaTypeObject{
-					ContentTypeForm: &MediaTypeObject{
+					ContentTypeForm: {
 						Schema: SchemaObject{
 							Type:       &objectType,
 							Properties: orderedmap.New(),
@@ -1203,14 +1216,14 @@ func (p *parser) parseRouteComment(operation *OperationObject, comment string) e
 	re := regexp.MustCompile(`([\w\.\/\-{}]+)[^\[]+\[([^\]]+)`)
 	matches := re.FindStringSubmatch(sourceString)
 	if len(matches) != 3 {
-		return fmt.Errorf("Can not parse router comment \"%s\", skipped", comment)
+		return fmt.Errorf("can not parse router comment \"%s\", skipped", comment)
 	}
 
 	_, ok := p.OpenAPI.Paths[matches[1]]
 	if !ok {
 		p.OpenAPI.Paths[matches[1]] = &PathItemObject{}
 	} else if p.routeAndMethodExist(matches[1], matches[2]) {
-		return fmt.Errorf("Already exists, %q [%q]", matches[1], matches[2])
+		return fmt.Errorf("already exists, %q [%q]", matches[1], matches[2])
 	}
 
 	switch strings.ToUpper(matches[2]) {
@@ -1269,7 +1282,7 @@ func (p *parser) registerType(pkgPath, pkgName, typeName string) (string, error)
 	}
 
 	if registerTypeName == "" {
-		return "", errors.New(fmt.Sprintf("Could not parse schema for %s %s %s", pkgName, pkgName, typeName))
+		return "", fmt.Errorf("could not parse schema for %s %s %s", pkgName, pkgName, typeName)
 	}
 
 	return registerTypeName, nil
@@ -1284,20 +1297,20 @@ func trimSplit(csl string) []string {
 }
 
 func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaObject, error) {
-	re := regexp.MustCompile("(?i)(oneOf|anyOf|allOf|not)\\(([^\\)]*)\\)")
+	re := regexp.MustCompile(`(?i)(oneOf|anyOf|allOf|not)\(([^\)]*)\)`)
 	matches := re.FindStringSubmatch(typeName)
 	if len(matches) < 3 {
 		return nil, nil
 	}
 	op := strings.ToLower(matches[1])
 	if matches[2] == "" {
-		return nil, fmt.Errorf("Expected 1 or more arguments, received '%s'", typeName)
+		return nil, fmt.Errorf("expected 1 or more arguments, received '%s'", typeName)
 	}
 	args := trimSplit(matches[2])
 
 	// not only supports one arg
 	if op == "not" && len(args) != 1 {
-		return nil, fmt.Errorf("Invalid number of arguments for not compound type, expected 1 received %d", len(args))
+		return nil, fmt.Errorf("invalid number of arguments for not compound type, expected 1 received %d", len(args))
 	}
 
 	var sobs []*SchemaObject
@@ -1320,7 +1333,7 @@ func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaO
 	case "allof":
 		sob.AllOf = sobs
 	default:
-		return nil, fmt.Errorf("Invalid compound type '%s'", op)
+		return nil, fmt.Errorf("invalid compound type '%s'", op)
 	}
 
 	return sob, nil
@@ -1387,10 +1400,10 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 	// handler other type
 	typeNameParts := strings.Split(typeName, ".")
 	if len(typeNameParts) == 1 {
-		typeSpec, exist = p.getTypeSpec(pkgPath, pkgName, typeName)
+		typeSpec, exist = p.getTypeSpec(pkgName, typeName)
 		if !exist {
 			for _, value := range p.KnownNamePkg {
-				typeSpec, exist = p.getTypeSpec(value.Path, value.Name, typeName)
+				typeSpec, exist = p.getTypeSpec(value.Name, typeName)
 				if exist {
 					pkgPath = value.Path
 					pkgName = value.Name
@@ -1414,7 +1427,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 			}
 		}
 		guessTypeName := typeNameParts[len(typeNameParts)-1]
-		typeSpec, exist = p.getTypeSpec(guessPkgName, guessPkgName, guessTypeName)
+		typeSpec, exist = p.getTypeSpec(guessPkgName, guessTypeName)
 		if !exist {
 			found := false
 			for k := range p.PkgNameImportedPkgAlias[pkgName] {
@@ -1437,9 +1450,9 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 			}
 			// p.debugf("guess %s ast.TypeSpec in package %s", guessTypeName, guessPkgName)
 
-			typeSpec, exist = p.getTypeSpec(guessPkgPath, guessPkgName, guessTypeName)
+			typeSpec, exist = p.getTypeSpec(guessPkgName, guessTypeName)
 			if !exist {
-				if p.CorePkgs[guessPkgName] == true {
+				if p.CorePkgs[guessPkgName] {
 					p.debugf("Ignoring missing type %s in core package %s", guessTypeName, guessPkgName)
 					schemaObject.Type = &objectType
 					return &schemaObject, nil
@@ -1525,7 +1538,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 			for potentialPackage, typeSpecs := range p.TypeSpecs {
 				if strings.HasSuffix(potentialPackage, packageName) {
 					// iterate through types of that package
-					for name, _ := range typeSpecs {
+					for name := range typeSpecs {
 						if name == usedTypeName {
 							parsedPackageSchema, err := p.parseSchemaObject(potentialPackage, potentialPackage, usedTypeName, false)
 							if err != nil {
@@ -1572,7 +1585,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 	return &schemaObject, nil
 }
 
-func (p *parser) getTypeSpec(pkgPath, pkgName, typeName string) (*ast.TypeSpec, bool) {
+func (p *parser) getTypeSpec(pkgName, typeName string) (*ast.TypeSpec, bool) {
 	pkgTypeSpecs, exist := p.TypeSpecs[pkgName]
 	if !exist {
 		return nil, false
@@ -1606,7 +1619,8 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *SchemaObje
 				nestedType := p.getTypeAsString(splitType[1])
 				setNestedFieldSchemaProps(splitType[0], nestedType, fieldSchema, structSchema)
 			} else {
-				_, err := p.registerType(pkgPath, pkgName, typeAsString)
+				var err error
+				p.registerType(pkgPath, pkgName, typeAsString)
 				fieldSchema, err = p.parseSchemaObject(pkgPath, pkgName, typeAsString, true)
 				if err != nil {
 					p.debug(err)
@@ -1645,9 +1659,10 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *SchemaObje
 				propertySchema, _ := fieldSchema.Properties.Get(propertyName)
 				structSchema.Properties.Set(propertyName, propertySchema)
 			}
-			for _, required := range fieldSchema.Required {
-				structSchema.Required = append(structSchema.Required, required)
-			}
+			// for _, required := range fieldSchema.Required {
+			// 	structSchema.Required = append(structSchema.Required, required)
+			// }
+			structSchema.Required = append(structSchema.Required, fieldSchema.Required...)
 		} else if len(fieldSchema.Ref) != 0 && len(fieldSchema.ID) != 0 {
 			refSchema, ok := p.KnownIDSchema[fieldSchema.ID]
 			if ok {
@@ -1869,7 +1884,7 @@ func (p *parser) genSchemaObjectID(pkgName, typeName string) string {
 func sortedPackageKeys(m map[string]*ast.Package) []string {
 	keys := make([]string, len(m))
 	i := 0
-	for k, _ := range m {
+	for k := range m {
 		keys[i] = k
 		i++
 	}
@@ -1880,7 +1895,7 @@ func sortedPackageKeys(m map[string]*ast.Package) []string {
 func sortedFileKeys(m map[string]*ast.File) []string {
 	keys := make([]string, len(m))
 	i := 0
-	for k, _ := range m {
+	for k := range m {
 		keys[i] = k
 		i++
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -62,7 +61,7 @@ func getModuleNameFromGoMod(path string) string {
 }
 
 func isInStringList(list []string, s string) bool {
-	for i, _ := range list {
+	for i := range list {
 		if list[i] == s {
 			return true
 		}
@@ -151,30 +150,30 @@ func addSchemaRefLinkPrefix(name string) string {
 	return replaceBackslash("#/components/schemas/" + name)
 }
 
-func getAliasedPackageName(pkgName string, aliases map[string]string) string {
-	pkgNameParsed := replaceBackslash(pkgName)
-	pkgNameParts := strings.Split(pkgNameParsed, "/")
-	lastPart := pkgNameParts[len(pkgNameParts)-1]
-	if val, ok := aliases[lastPart]; ok {
-		return val
-	} else {
-		return pkgNameParsed
-	}
-}
+// func getAliasedPackageName(pkgName string, aliases map[string]string) string {
+// 	pkgNameParsed := replaceBackslash(pkgName)
+// 	pkgNameParts := strings.Split(pkgNameParsed, "/")
+// 	lastPart := pkgNameParts[len(pkgNameParts)-1]
+// 	if val, ok := aliases[lastPart]; ok {
+// 		return val
+// 	} else {
+// 		return pkgNameParsed
+// 	}
+// }
 
-func getAliasedTypeName(typeName string, aliases map[string]string) string {
-	typeNameParts := strings.Split(typeName, ".")
-	firstPart := typeNameParts[0]
-	if val, ok := aliases[firstPart]; ok {
-		if val != "" {
-			return fmt.Sprintf("%s.%s", val, typeNameParts[len(typeNameParts)-1])
-		} else {
-			return typeNameParts[len(typeNameParts)-1]
-		}
-	}
+// func getAliasedTypeName(typeName string, aliases map[string]string) string {
+// 	typeNameParts := strings.Split(typeName, ".")
+// 	firstPart := typeNameParts[0]
+// 	if val, ok := aliases[firstPart]; ok {
+// 		if val != "" {
+// 			return fmt.Sprintf("%s.%s", val, typeNameParts[len(typeNameParts)-1])
+// 		} else {
+// 			return typeNameParts[len(typeNameParts)-1]
+// 		}
+// 	}
 
-	return typeName
-}
+// 	return typeName
+// }
 
 func replaceBackslash(origin string) string {
 	return strings.ReplaceAll(origin, "\\", "/")
