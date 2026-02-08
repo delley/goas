@@ -1,11 +1,19 @@
-module github.com/launchdarkly/goas
+module github.com/delley/goas
 
-go 1.15
+go 1.25.6
 
 require (
-	github.com/iancoleman/orderedmap v0.1.0
+	github.com/iancoleman/orderedmap v0.3.0
 	github.com/jarcoal/httpmock v1.0.8
-	github.com/stretchr/testify v1.7.0
-	github.com/urfave/cli v1.22.5
-	golang.org/x/mod v0.4.0
+	github.com/stretchr/testify v1.10.0
+	github.com/urfave/cli v1.22.17
+	golang.org/x/mod v0.32.0
+)
+
+require (
+	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
