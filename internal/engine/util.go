@@ -1,66 +1,11 @@
 package engine
 
 import (
-	"bufio"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/delley/goas/internal/openapi"
 )
-
-func isMainFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	var isMainPackage, hasMainFunc bool
-
-	bs := bufio.NewScanner(f)
-	for bs.Scan() {
-		l := bs.Text()
-		if !isMainPackage && strings.HasPrefix(l, "package main") {
-			isMainPackage = true
-		}
-		if !hasMainFunc && strings.HasPrefix(l, "func main()") {
-			hasMainFunc = true
-		}
-		if isMainPackage && hasMainFunc {
-			break
-		}
-	}
-	if bs.Err() != nil {
-		log.Fatal(bs.Err())
-	}
-
-	return isMainPackage && hasMainFunc
-}
-
-func getModuleNameFromGoMod(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	moduleName := ""
-
-	bs := bufio.NewScanner(f)
-	for bs.Scan() {
-		l := strings.TrimSpace(bs.Text())
-		if strings.HasPrefix(l, "module") {
-			moduleName = strings.TrimSpace(strings.TrimPrefix(l, "module"))
-			break
-		}
-	}
-	// if bs.Err() != nil {
-	// 	return ""
-	// }
-
-	return moduleName
-}
 
 func isInStringList(list []string, s string) bool {
 	for i := range list {

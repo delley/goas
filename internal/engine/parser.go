@@ -9,18 +9,17 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/delley/goas/internal/annotate"
 	"github.com/delley/goas/internal/desc"
+	"github.com/delley/goas/internal/load"
 	"github.com/delley/goas/internal/openapi"
 	"github.com/iancoleman/orderedmap"
 	module "golang.org/x/mod/modfile"
@@ -133,7 +132,8 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 			return nil, err
 		}
 		for _, fn := range fns {
-			if isMainFile(fn) {
+			isMain, err := load.IsMainFile(fn)
+			if err == nil && isMain {
 				mainFilePath = fn
 				break
 			}
@@ -154,10 +154,11 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	p.debugf("main file path: %s", p.MainFilePath)
 
 	// get module name from go.mod file
-	moduleName := getModuleNameFromGoMod(goModFilePath)
-	if moduleName == "" {
-		return nil, fmt.Errorf("cannot get module name from %s", goModFileInfo)
+	moduleName, err := load.ModuleNameFromGoMod(goModFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get module name from %s: %w", goModFilePath, err)
 	}
+
 	p.ModuleName = moduleName
 	p.debugf("module name: %s", p.ModuleName)
 
@@ -170,7 +171,7 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	if goPath == "" {
 		user, err := user.Current()
 		if err != nil {
-			return nil, fmt.Errorf("cannot get current user: %s", err)
+			return nil, fmt.Errorf("cannot get current user: %w", err)
 		}
 		goPath = filepath.Join(user.HomeDir, "go")
 	}
@@ -188,7 +189,7 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	p.GoModCachePath = goModCachePath
 	p.debugf("go module cache path: %s", p.GoModCachePath)
 
-	goRoot, err := getGoRoot()
+	goRoot, err := load.GoRoot()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get GOROOT: %w", err)
 	}
@@ -224,15 +225,6 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	}
 
 	return p, nil
-}
-
-func getGoRoot() (string, error) {
-	cmd := exec.Command("go", "env", "GOROOT")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
 }
 
 func (p *parser) parse() error {
@@ -637,9 +629,9 @@ func (p *parser) parseImportStatements() error {
 		}
 
 		p.PkgNameImportedPkgAlias[pkgName] = map[string][]string{}
-		for _, astPackageKey := range sortedPackageKeys(astPkgs) {
+		for _, astPackageKey := range load.SortedKeys(astPkgs) {
 			astPackage := astPkgs[astPackageKey]
-			for _, astFileKey := range sortedFileKeys(astPackage.Files) {
+			for _, astFileKey := range load.SortedKeys(astPackage.Files) {
 				astFile := astPackage.Files[astFileKey]
 				for _, astImport := range astFile.Imports {
 					importedPkgName := strings.Trim(astImport.Path.Value, "\"")
@@ -689,9 +681,9 @@ func (p *parser) parseTypeSpecs() error {
 			p.debugf("parseTypeSpecs: parse of %s package cause error: %s\n", pkgPath, err)
 			continue
 		}
-		for _, astPackageKey := range sortedPackageKeys(astPkgs) {
+		for _, astPackageKey := range load.SortedKeys(astPkgs) {
 			astPackage := astPkgs[astPackageKey]
-			for _, astFileKey := range sortedFileKeys(astPackage.Files) {
+			for _, astFileKey := range load.SortedKeys(astPackage.Files) {
 				astFile := astPackage.Files[astFileKey]
 				for _, astDeclaration := range astFile.Decls {
 					if astGenDeclaration, ok := astDeclaration.(*ast.GenDecl); ok && astGenDeclaration.Tok == token.TYPE {
@@ -767,9 +759,9 @@ func (p *parser) parsePaths() error {
 			p.debugf("parsePaths: parse of %s package cause error: %s\n", pkgPath, err)
 			continue
 		}
-		for _, astPackageKey := range sortedPackageKeys(astPkgs) {
+		for _, astPackageKey := range load.SortedKeys(astPkgs) {
 			astPackage := astPkgs[astPackageKey]
-			for _, astFileKey := range sortedFileKeys(astPackage.Files) {
+			for _, astFileKey := range load.SortedKeys(astPackage.Files) {
 				astFile := astPackage.Files[astFileKey]
 				for _, astDeclaration := range astFile.Decls {
 					if astFuncDeclaration, ok := astDeclaration.(*ast.FuncDecl); ok {
@@ -1741,28 +1733,6 @@ func (p *parser) genSchemaObjectID(pkgName, typeName string) string {
 	} else {
 		return strings.Join(append([]string{pkgNameParts[len(pkgNameParts)-1]}, typeNameParts[len(typeNameParts)-1]), ".")
 	}
-}
-
-func sortedPackageKeys(m map[string]*ast.Package) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = k
-		i++
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedFileKeys(m map[string]*ast.File) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = k
-		i++
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func setNestedFieldSchemaProps(valuePrefix, typeAsString string, fieldSchema, structSchema *openapi.SchemaObject) {
