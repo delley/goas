@@ -20,6 +20,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/delley/goas/internal/openapi"
 	"github.com/iancoleman/orderedmap"
 	module "golang.org/x/mod/modfile"
 )
@@ -88,7 +89,7 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 		ShowHidden:              showHidden,
 		FileRefPath:             descriptionRefPath,
 	}
-	p.OpenAPI.OpenAPI = OpenAPIVersion
+	p.OpenAPI.OpenAPI = openapi.OpenAPIVersion
 	p.OpenAPI.Paths = make(PathsObject)
 	p.OpenAPI.Security = []map[string][]string{}
 	p.OpenAPI.Components.Schemas = make(map[string]*SchemaObject)
@@ -290,7 +291,7 @@ func (p *parser) CreateOASFile(path string) error {
 		return err
 	}
 
-	output, err := json.MarshalIndent(p.OpenAPI, "", "  ")
+	output, err := openapi.Marshal(&p.OpenAPI, openapi.MarshalOptions{Indent: "  "})
 	if err != nil {
 		return err
 	}
@@ -980,7 +981,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 		if operation.RequestBody == nil {
 			operation.RequestBody = &RequestBodyObject{
 				Content: map[string]*MediaTypeObject{
-					ContentTypeForm: {
+					openapi.ContentTypeForm: {
 						Schema: SchemaObject{
 							Type:       &objectType,
 							Properties: orderedmap.New(),
@@ -991,13 +992,13 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 			}
 		}
 		if in == "file" {
-			operation.RequestBody.Content[ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
 				Type:        &stringType,
 				Format:      "binary",
 				Description: description,
 			})
 		} else if in == "files" {
-			operation.RequestBody.Content[ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
 				Type: &arrayType,
 				Items: &SchemaObject{
 					Type:   &stringType,
@@ -1007,7 +1008,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 			})
 		} else if isGoTypeOASType(goType) {
 			localGoType := goTypesOASTypes[goType]
-			operation.RequestBody.Content[ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
 				Type:        &localGoType,
 				Format:      goTypesOASFormats[goType],
 				Description: description,
@@ -1057,7 +1058,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 	if err != nil {
 		return err
 	}
-	operation.RequestBody.Content[ContentTypeJson] = &MediaTypeObject{
+	operation.RequestBody.Content[openapi.ContentTypeJson] = &MediaTypeObject{
 		Schema: *s,
 	}
 	// parse example
@@ -1066,7 +1067,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 		if err != nil {
 			return err
 		}
-		operation.RequestBody.Content[ContentTypeJson].Example = exampleRequestBody
+		operation.RequestBody.Content[openapi.ContentTypeJson].Example = exampleRequestBody
 	}
 
 	return nil
@@ -1158,7 +1159,7 @@ func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *Operat
 			if err != nil {
 				p.debug("parseResponseComment: cannot parse goType", goType)
 			}
-			responseObject.Content[ContentTypeJson] = &MediaTypeObject{
+			responseObject.Content[openapi.ContentTypeJson] = &MediaTypeObject{
 				Schema: *schema,
 			}
 		} else {
@@ -1167,13 +1168,13 @@ func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *Operat
 				return err
 			}
 			if isBasicGoType(typeName) {
-				responseObject.Content[ContentTypeText] = &MediaTypeObject{
+				responseObject.Content[openapi.ContentTypeText] = &MediaTypeObject{
 					Schema: SchemaObject{
 						Type: &stringType,
 					},
 				}
 			} else {
-				responseObject.Content[ContentTypeJson] = &MediaTypeObject{
+				responseObject.Content[openapi.ContentTypeJson] = &MediaTypeObject{
 					Schema: SchemaObject{
 						Ref: addSchemaRefLinkPrefix(typeName),
 					},

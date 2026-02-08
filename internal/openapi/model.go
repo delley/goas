@@ -1,10 +1,6 @@
-package engine
+package openapi
 
 import (
-	"encoding/json"
-	"errors"
-	"strings"
-
 	"github.com/iancoleman/orderedmap"
 )
 
@@ -53,17 +49,6 @@ type ReffableString struct {
 
 type reference struct {
 	Ref string `json:"$ref"`
-}
-
-func (r ReffableString) MarshalJSON() ([]byte, error) {
-	if strings.HasPrefix(r.Value, "$ref:") {
-		if r.Value == "$ref:" {
-			return nil, errors.New("$ref is missing URL")
-		}
-		// encode as a reference object instead of a string
-		return json.Marshal(reference{Ref: r.Value[5:]})
-	}
-	return json.Marshal(r.Value)
 }
 
 type ContactObject struct {
@@ -267,24 +252,6 @@ type SecuritySchemeOauthObject struct {
 	AuthorizationCode     *SecuritySchemeOauthFlowObject `json:"authorizationCode,omitempty"`
 	ResourceOwnerPassword *SecuritySchemeOauthFlowObject `json:"password,omitempty"`
 	ClientCredentials     *SecuritySchemeOauthFlowObject `json:"clientCredentials,omitempty"`
-}
-
-func (s *SecuritySchemeOauthObject) ApplyScopes(scopes map[string]string) {
-	if s.Implicit != nil {
-		s.Implicit.Scopes = scopes
-	}
-
-	if s.AuthorizationCode != nil {
-		s.AuthorizationCode.Scopes = scopes
-	}
-
-	if s.ResourceOwnerPassword != nil {
-		s.ResourceOwnerPassword.Scopes = scopes
-	}
-
-	if s.ClientCredentials != nil {
-		s.ClientCredentials.Scopes = scopes
-	}
 }
 
 type SecuritySchemeOauthFlowObject struct {
