@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	goparser "go/parser"
 	"go/token"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/delley/goas/internal/annotate"
+	"github.com/delley/goas/internal/desc"
 	"github.com/delley/goas/internal/openapi"
 	"github.com/iancoleman/orderedmap"
 	module "golang.org/x/mod/modfile"
@@ -38,13 +39,13 @@ type parser struct {
 	GoModCachePath string
 	GoRootSrcPath  string
 
-	OpenAPI OpenAPIObject
+	OpenAPI openapi.OpenAPIObject
 
 	CorePkgs      map[string]bool
 	KnownPkgs     []pkg
 	KnownNamePkg  map[string]*pkg
 	KnownPathPkg  map[string]*pkg
-	KnownIDSchema map[string]*SchemaObject
+	KnownIDSchema map[string]*openapi.SchemaObject
 
 	TypeSpecs               map[string]map[string]*ast.TypeSpec
 	PkgPathAstPkgCache      map[string]map[string]*ast.Package
@@ -80,7 +81,7 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 		KnownPkgs:               []pkg{},
 		KnownNamePkg:            map[string]*pkg{},
 		KnownPathPkg:            map[string]*pkg{},
-		KnownIDSchema:           map[string]*SchemaObject{},
+		KnownIDSchema:           map[string]*openapi.SchemaObject{},
 		TypeSpecs:               map[string]map[string]*ast.TypeSpec{},
 		PkgPathAstPkgCache:      map[string]map[string]*ast.Package{},
 		PkgNameImportedPkgAlias: map[string]map[string][]string{},
@@ -90,10 +91,10 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 		FileRefPath:             descriptionRefPath,
 	}
 	p.OpenAPI.OpenAPI = openapi.OpenAPIVersion
-	p.OpenAPI.Paths = make(PathsObject)
+	p.OpenAPI.Paths = make(openapi.PathsObject)
 	p.OpenAPI.Security = []map[string][]string{}
-	p.OpenAPI.Components.Schemas = make(map[string]*SchemaObject)
-	p.OpenAPI.Components.SecuritySchemes = map[string]*SecuritySchemeObject{}
+	p.OpenAPI.Components.Schemas = make(map[string]*openapi.SchemaObject)
+	p.OpenAPI.Components.SecuritySchemes = map[string]*openapi.SecuritySchemeObject{}
 
 	// check modulePath is exist
 	modulePath, _ = filepath.Abs(modulePath)
@@ -286,7 +287,7 @@ func (p *parser) CreateOASFile(path string) error {
 
 	// for descriptions specified with $refs, pull that content in and embed it directly
 	// TODO may be a good idea to make this optional via clarg
-	err = p.explodeRefs()
+	err = desc.ExplodeRefs(p.FileRefPath, &p.OpenAPI)
 	if err != nil {
 		return err
 	}
@@ -314,55 +315,6 @@ func (p *parser) validateSchemaNames() []string {
 		}
 	}
 	return conflicts
-}
-
-func (p *parser) explodeRefs() error {
-	if p.OpenAPI.Info.Description != nil {
-		desc, err := fetchRef(p.FileRefPath, p.OpenAPI.Info.Description.Value)
-		if err != nil {
-			return err
-		}
-		p.OpenAPI.Info.Description.Value = desc
-	}
-	for i, tag := range p.OpenAPI.Tags {
-		if tag.Description == nil {
-			continue
-		}
-		desc, err := fetchRef(p.FileRefPath, tag.Description.Value)
-		if err != nil {
-			return err
-		}
-		p.OpenAPI.Tags[i].Description.Value = desc
-	}
-
-	return nil
-}
-
-func fetchRef(filePath, description string) (string, error) {
-	if !strings.HasPrefix(description, "$ref:") {
-		return description, nil
-	}
-	url := description[5:]
-	if strings.HasPrefix(url, "file://") {
-		descPath := strings.Join([]string{filePath, url[7:]}, "/")
-		dat, err := os.ReadFile(descPath)
-		if err != nil {
-			return "", err
-		}
-		return string(dat), nil
-	}
-	// else assume http and fetch
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
 }
 
 func (p *parser) parseEntryPoint() error {
@@ -394,39 +346,39 @@ func (p *parser) parseEntryPoint() error {
 					p.OpenAPI.Info.Title = value
 				case "@description":
 					if p.OpenAPI.Info.Description == nil {
-						p.OpenAPI.Info.Description = &ReffableString{}
+						p.OpenAPI.Info.Description = &openapi.ReffableString{}
 					}
 					p.OpenAPI.Info.Description.Value = value
 				case "@termsofserviceurl":
 					p.OpenAPI.Info.TermsOfService = value
 				case "@contactname":
 					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &ContactObject{}
+						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
 					}
 					p.OpenAPI.Info.Contact.Name = value
 				case "@contactemail":
 					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &ContactObject{}
+						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
 					}
 					p.OpenAPI.Info.Contact.Email = value
 				case "@contacturl":
 					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &ContactObject{}
+						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
 					}
 					p.OpenAPI.Info.Contact.URL = value
 				case "@licensename":
 					if p.OpenAPI.Info.License == nil {
-						p.OpenAPI.Info.License = &LicenseObject{}
+						p.OpenAPI.Info.License = &openapi.LicenseObject{}
 					}
 					p.OpenAPI.Info.License.Name = value
 				case "@licenseurl":
 					if p.OpenAPI.Info.License == nil {
-						p.OpenAPI.Info.License = &LicenseObject{}
+						p.OpenAPI.Info.License = &openapi.LicenseObject{}
 					}
 					p.OpenAPI.Info.License.URL = value
 				case "@server":
 					fields := strings.Split(value, " ")
-					s := ServerObject{URL: fields[0], Description: value[len(fields[0]):]}
+					s := openapi.ServerObject{URL: fields[0], Description: value[len(fields[0]):]}
 					p.OpenAPI.Servers = append(p.OpenAPI.Servers, s)
 				case "@security":
 					fields := strings.Split(value, " ")
@@ -437,20 +389,20 @@ func (p *parser) parseEntryPoint() error {
 				case "@securityscheme":
 					fields := strings.Split(value, " ")
 
-					var scheme *SecuritySchemeObject
+					var scheme *openapi.SecuritySchemeObject
 					if strings.Contains(fields[1], "oauth2") {
 						if oauthScheme, ok := p.OpenAPI.Components.SecuritySchemes[fields[0]]; ok {
 							scheme = oauthScheme
 						} else {
-							scheme = &SecuritySchemeObject{
+							scheme = &openapi.SecuritySchemeObject{
 								Type:       "oauth2",
-								OAuthFlows: &SecuritySchemeOauthObject{},
+								OAuthFlows: &openapi.SecuritySchemeOauthObject{},
 							}
 						}
 					}
 
 					if scheme == nil {
-						scheme = &SecuritySchemeObject{
+						scheme = &openapi.SecuritySchemeObject{
 							Type: fields[1],
 						}
 					}
@@ -466,23 +418,23 @@ func (p *parser) parseEntryPoint() error {
 						scheme.OpenIdConnectUrl = fields[2]
 						scheme.Description = strings.Join(fields[3:], " ")
 					case "oauth2AuthCode":
-						scheme.OAuthFlows.AuthorizationCode = &SecuritySchemeOauthFlowObject{
+						scheme.OAuthFlows.AuthorizationCode = &openapi.SecuritySchemeOauthFlowObject{
 							AuthorizationUrl: fields[2],
 							TokenUrl:         fields[3],
 							Scopes:           make(map[string]string, 0),
 						}
 					case "oauth2Implicit":
-						scheme.OAuthFlows.Implicit = &SecuritySchemeOauthFlowObject{
+						scheme.OAuthFlows.Implicit = &openapi.SecuritySchemeOauthFlowObject{
 							AuthorizationUrl: fields[2],
 							Scopes:           make(map[string]string, 0),
 						}
 					case "oauth2ResourceOwnerCredentials":
-						scheme.OAuthFlows.ResourceOwnerPassword = &SecuritySchemeOauthFlowObject{
+						scheme.OAuthFlows.ResourceOwnerPassword = &openapi.SecuritySchemeOauthFlowObject{
 							TokenUrl: fields[2],
 							Scopes:   make(map[string]string, 0),
 						}
 					case "oauth2ClientCredentials":
-						scheme.OAuthFlows.ClientCredentials = &SecuritySchemeOauthFlowObject{
+						scheme.OAuthFlows.ClientCredentials = &openapi.SecuritySchemeOauthFlowObject{
 							TokenUrl: fields[2],
 							Scopes:   make(map[string]string, 0),
 						}
@@ -497,7 +449,7 @@ func (p *parser) parseEntryPoint() error {
 
 					oauthScopes[fields[0]][fields[1]] = strings.Join(fields[2:], " ")
 				case "@tags":
-					t, err := parseTags(comment)
+					t, err := annotate.ParseTags(comment)
 
 					if err != nil {
 						return err
@@ -519,7 +471,7 @@ func (p *parser) parseEntryPoint() error {
 	}
 
 	if len(p.OpenAPI.Servers) < 1 {
-		p.OpenAPI.Servers = append(p.OpenAPI.Servers, ServerObject{URL: "/", Description: "Default Server URL"})
+		p.OpenAPI.Servers = append(p.OpenAPI.Servers, openapi.ServerObject{URL: "/", Description: "Default Server URL"})
 	}
 
 	if p.OpenAPI.Info.Title == "" {
@@ -535,20 +487,6 @@ func (p *parser) parseEntryPoint() error {
 	}
 
 	return nil
-}
-
-func parseTags(comment string) (*TagDefinition, error) {
-	re := regexp.MustCompile("\"([^\"]*)\"")
-	matches := re.FindAllStringSubmatch(comment, -1)
-	if len(matches) == 0 || len(matches[0]) == 1 {
-		return nil, fmt.Errorf("expected: @Tags \"<name>\" [\"<description>\"] received: %s", comment)
-	}
-	tag := TagDefinition{Name: matches[0][1]}
-	if len(matches) > 1 {
-		tag.Description = &ReffableString{Value: matches[1][1]}
-	}
-
-	return &tag, nil
 }
 
 func (p *parser) parseModule() error {
@@ -808,23 +746,14 @@ func (p *parser) parseTypeSpecs() error {
 }
 
 func (p *parser) parseTypeAnnotations(pkgName string, typeName string, commentGroup *ast.CommentGroup) error {
-	for _, comment := range commentGroup.List {
-		fields := strings.Fields(strings.TrimLeft(comment.Text, "/"))
-		if len(fields) == 0 {
-			continue
-		}
-		switch strings.ToLower(fields[0]) {
-		case "@apischemaname":
-			if len(fields) < 2 {
-				return fmt.Errorf("expected \"// @ApiSchemaName {alias}\" received %s", comment.Text)
-			}
-			if p.ApiSchemaNames[pkgName] == nil {
-				p.ApiSchemaNames[pkgName] = map[string]string{}
-			}
-			p.ApiSchemaNames[pkgName][typeName] = fields[1]
-		}
+	alias, ok, err := annotate.ParseApiSchemaName(commentGroup)
+	if err != nil || !ok {
+		return err
 	}
-
+	if p.ApiSchemaNames[pkgName] == nil {
+		p.ApiSchemaNames[pkgName] = map[string]string{}
+	}
+	p.ApiSchemaNames[pkgName][typeName] = alias
 	return nil
 }
 
@@ -866,24 +795,9 @@ func (p *parser) parsePaths() error {
 	return nil
 }
 
-func isHidden(astComments []*ast.Comment, showHidden bool) bool {
-	for _, astComment := range astComments {
-		comment := strings.TrimSpace(strings.TrimLeft(astComment.Text, "/"))
-		if len(comment) == 0 {
-			// ignore empty lines
-			continue
-		}
-		attribute := strings.Fields(comment)[0]
-		if strings.ToLower(attribute) == "@hidden" && !showHidden {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comment) error {
-	operation := &OperationObject{
-		Responses: map[string]*ResponseObject{},
+	operation := &openapi.OperationObject{
+		Responses: map[string]*openapi.ResponseObject{},
 	}
 	if !strings.HasPrefix(pkgPath, p.ModulePath) {
 		// ignore this pkgName
@@ -892,7 +806,7 @@ func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comm
 	} else if p.HandlerPath != "" && !strings.HasPrefix(pkgPath, p.HandlerPath) {
 		return nil
 	}
-	if isHidden(astComments, p.ShowHidden) {
+	if annotate.IsHidden(astComments, p.ShowHidden) {
 		return nil
 	}
 	var err error
@@ -941,106 +855,90 @@ func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comm
 	return nil
 }
 
-func (p *parser) parseDescription(operation *OperationObject, description string) error {
-	desc, err := fetchRef(p.FileRefPath, description)
+func (p *parser) parseDescription(operation *openapi.OperationObject, description string) error {
+	descText, err := desc.FetchRef(p.FileRefPath, description)
 	if err != nil {
 		return err
 	}
 	if operation.Description == "" {
-		operation.Description = desc
+		operation.Description = descText
 	} else {
-		operation.Description = operation.Description + " " + desc
+		operation.Description = operation.Description + " " + descText
 	}
 	return nil
 }
 
-func (p *parser) parseParamComment(pkgPath, pkgName string, operation *OperationObject, comment string) error {
-	// {name}  {in}  {goType}  {required}  {description}  		{example (optional)}
-	// user    body  User      true        "Info of a user."	"{\"name\":\"Bilbo\"}"
-	// f       file  ignored   true        "Upload a file."
-	re := regexp.MustCompile(`([-\w]+)[\s]+([\w]+)[\s]+([\w./\[\]\\(\\),]+)[\s]+([\w]+)[\s]+"([^"]+)"(?:[\s]+"((?:[^"\\]|\\")*)")?`)
-	matches := re.FindStringSubmatch(comment)
-	if len(matches) < 6 {
-		return fmt.Errorf("parseParamComment can not parse param comment \"%s\"", comment)
+func (p *parser) parseParamComment(pkgPath, pkgName string, operation *openapi.OperationObject, comment string) error {
+	spec, err := annotate.ParseParamComment(comment)
+	if err != nil {
+		return err
 	}
-	name := matches[1]
-	in := matches[2]
-
-	re = regexp.MustCompile(`\[\w*\]`)
-	goType := re.ReplaceAllString(matches[3], "[]")
-
-	required := false
-	switch strings.ToLower(matches[4]) {
-	case "true", "required":
-		required = true
-	}
-	description := matches[5]
 
 	// `file`, `form`
-	if in == "file" || in == "files" || in == "form" {
+	if spec.In == "file" || spec.In == "files" || spec.In == "form" {
 		if operation.RequestBody == nil {
-			operation.RequestBody = &RequestBodyObject{
-				Content: map[string]*MediaTypeObject{
+			operation.RequestBody = &openapi.RequestBodyObject{
+				Content: map[string]*openapi.MediaTypeObject{
 					openapi.ContentTypeForm: {
-						Schema: SchemaObject{
+						Schema: openapi.SchemaObject{
 							Type:       &objectType,
 							Properties: orderedmap.New(),
 						},
 					},
 				},
-				Required: required,
+				Required: spec.Required,
 			}
 		}
-		if in == "file" {
-			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+		if spec.In == "file" {
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(spec.Name, &openapi.SchemaObject{
 				Type:        &stringType,
 				Format:      "binary",
-				Description: description,
+				Description: spec.Description,
 			})
-		} else if in == "files" {
-			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+		} else if spec.In == "files" {
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(spec.Name, &openapi.SchemaObject{
 				Type: &arrayType,
-				Items: &SchemaObject{
+				Items: &openapi.SchemaObject{
 					Type:   &stringType,
 					Format: "binary",
 				},
-				Description: description,
+				Description: spec.Description,
 			})
-		} else if isGoTypeOASType(goType) {
-			localGoType := goTypesOASTypes[goType]
-			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(name, &SchemaObject{
+		} else if isGoTypeOASType(spec.GoType) {
+			localGoType := goTypesOASTypes[spec.GoType]
+			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(spec.Name, &openapi.SchemaObject{
 				Type:        &localGoType,
-				Format:      goTypesOASFormats[goType],
-				Description: description,
+				Format:      goTypesOASFormats[spec.GoType],
+				Description: spec.Description,
 			})
 		}
 		return nil
 	}
 
 	// `path`, `query`, `header`, `cookie`
-	if in != "body" {
-		parameterObject := ParameterObject{
-			Name:        name,
-			In:          in,
-			Description: description,
-			Required:    required,
+	if spec.In != "body" {
+		parameterObject := openapi.ParameterObject{
+			Name:        spec.Name,
+			In:          spec.In,
+			Description: spec.Description,
+			Required:    spec.Required,
 		}
-		if in == "path" {
+		if spec.In == "path" {
 			parameterObject.Required = true
 		}
-		if goType == "time.Time" {
+		if spec.GoType == "time.Time" {
 			var err error
-			parameterObject.Schema, err = p.parseSchemaObject(pkgPath, pkgName, goType, true)
+			parameterObject.Schema, err = p.parseSchemaObject(pkgPath, pkgName, spec.GoType, true)
 			if err != nil {
-				p.debug("parseResponseComment cannot parse goType", goType)
+				p.debug("parseParamComment cannot parse goType", spec.GoType)
 			}
 			operation.Parameters = append(operation.Parameters, parameterObject)
-		} else if isGoTypeOASType(goType) {
-			localGoType := goTypesOASTypes[goType]
-			parameterObject.Schema = &SchemaObject{
+		} else if isGoTypeOASType(spec.GoType) {
+			localGoType := goTypesOASTypes[spec.GoType]
+			parameterObject.Schema = &openapi.SchemaObject{
 				Type:        &localGoType,
-				Format:      goTypesOASFormats[goType],
-				Description: description,
+				Format:      goTypesOASFormats[spec.GoType],
+				Description: spec.Description,
 			}
 			operation.Parameters = append(operation.Parameters, parameterObject)
 		}
@@ -1048,22 +946,23 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 	}
 
 	if operation.RequestBody == nil {
-		operation.RequestBody = &RequestBodyObject{
-			Content:  map[string]*MediaTypeObject{},
-			Required: required,
+		operation.RequestBody = &openapi.RequestBodyObject{
+			Content:  map[string]*openapi.MediaTypeObject{},
+			Required: spec.Required,
 		}
 	}
 
-	s, err := p.parseBodyType(pkgPath, pkgName, goType)
+	s, err := p.parseBodyType(pkgPath, pkgName, spec.GoType)
 	if err != nil {
 		return err
 	}
-	operation.RequestBody.Content[openapi.ContentTypeJson] = &MediaTypeObject{
+	operation.RequestBody.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{
 		Schema: *s,
 	}
+
 	// parse example
-	if len(matches) > 6 && matches[6] != "" {
-		exampleRequestBody, err := parseRequestBodyExample(matches[6])
+	if spec.ExampleRaw != "" {
+		exampleRequestBody, err := annotate.ParseRequestBodyExample(spec.ExampleRaw)
 		if err != nil {
 			return err
 		}
@@ -1073,16 +972,7 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *Operation
 	return nil
 }
 
-func parseRequestBodyExample(example string) (interface{}, error) {
-	var exampleRequestBody interface{}
-	err := json.Unmarshal([]byte(strings.Replace(example, "\\\"", "\"", -1)), &exampleRequestBody)
-	if err != nil {
-		return nil, err
-	}
-	return exampleRequestBody, nil
-}
-
-func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*SchemaObject, error) {
+func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*openapi.SchemaObject, error) {
 	if strings.HasPrefix(typeName, "[]") || strings.HasPrefix(typeName, "map[]") || typeName == "time.Time" {
 		schema, err := p.parseSchemaObject(pkgPath, pkgName, typeName, true)
 		if err != nil {
@@ -1102,92 +992,64 @@ func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*SchemaObject
 		return nil, err
 	}
 	if isBasicGoType(registeredTypeName) {
-		return &SchemaObject{
+		return &openapi.SchemaObject{
 			Type: &stringType,
 		}, nil
 	} else {
-		return &SchemaObject{
+		return &openapi.SchemaObject{
 			Ref: addSchemaRefLinkPrefix(registeredTypeName),
 		}, nil
 	}
 }
 
-func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *OperationObject, comment string) error {
-	// {status}  {jsonType}  {goType}     {description}
-	// 201       object      models.User  "User Model"
-	// if 204 or something else without empty return payload
-	// 204 "User Model"
-	re := regexp.MustCompile(`(?P<status>[\d]+)[\s]*(?P<jsonType>[\w\{\}]+)?[\s]+(?P<goType>[\w\-\.\/\[\]]+)?[^"]*(?P<description>.*)?`)
-	matches := re.FindStringSubmatch(comment)
-
-	paramsMap := make(map[string]string)
-	for i, name := range re.SubexpNames() {
-		if i > 0 && i <= len(matches) {
-			paramsMap[name] = matches[i]
-		}
-	}
-
-	if len(matches) <= 2 {
-		return fmt.Errorf("parseResponseComment can not parse response comment \"%s\", matches: %v", comment, matches)
-	}
-
-	status := paramsMap["status"]
-	_, err := strconv.Atoi(status)
+func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *openapi.OperationObject, comment string) error {
+	spec, err := annotate.ParseResponseComment(comment)
 	if err != nil {
-		return fmt.Errorf("parseResponseComment: http status must be int, but got %s", status)
+		return err
 	}
 
-	// ignore type if not set
-	if jsonType := paramsMap["jsonType"]; jsonType != "" {
-		switch jsonType {
-		case "object", "array", "{object}", "{array}":
-		default:
-			return fmt.Errorf("parseResponseComment: invalid jsonType \"%s\"", paramsMap["jsonType"])
-		}
-	}
+	status := spec.Status
 
-	responseObject := &ResponseObject{
-		Content: map[string]*MediaTypeObject{},
+	responseObject := &openapi.ResponseObject{
+		Content: map[string]*openapi.MediaTypeObject{},
 	}
-	responseObject.Description = strings.Trim(paramsMap["description"], "\"")
+	responseObject.Description = spec.Description
 
-	if goTypeRaw := paramsMap["goType"]; goTypeRaw != "" {
-		re = regexp.MustCompile(`\[\w*\]`)
-		goType := re.ReplaceAllString(goTypeRaw, "[]")
+	if spec.GoType != "" {
+		goType := spec.GoType
 		if strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[]") {
 			schema, err := p.parseSchemaObject(pkgPath, pkgName, goType, true)
 			if err != nil {
 				p.debug("parseResponseComment: cannot parse goType", goType)
 			}
-			responseObject.Content[openapi.ContentTypeJson] = &MediaTypeObject{
-				Schema: *schema,
-			}
+			responseObject.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{Schema: *schema}
 		} else {
-			typeName, err := p.registerType(pkgPath, pkgName, matches[3])
+			// aqui mantém seu comportamento original (mesmo detalhe do matches[3]):
+			typeName, err := p.registerType(pkgPath, pkgName, goType)
 			if err != nil {
 				return err
 			}
 			if isBasicGoType(typeName) {
-				responseObject.Content[openapi.ContentTypeText] = &MediaTypeObject{
-					Schema: SchemaObject{
-						Type: &stringType,
-					},
+				responseObject.Content[openapi.ContentTypeText] = &openapi.MediaTypeObject{
+					Schema: openapi.SchemaObject{Type: &stringType},
 				}
 			} else {
-				responseObject.Content[openapi.ContentTypeJson] = &MediaTypeObject{
-					Schema: SchemaObject{
-						Ref: addSchemaRefLinkPrefix(typeName),
-					},
+				responseObject.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{
+					Schema: openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeName)},
 				}
 			}
 		}
 	}
 	operation.Responses[status] = responseObject
-
 	return nil
 }
 
 func (p *parser) routeAndMethodExist(route string, method string) bool {
+	pi, ok := p.OpenAPI.Paths[route]
+	if !ok || pi == nil {
+		return false
+	}
+
 	switch strings.ToUpper(method) {
 	case http.MethodGet:
 		return p.OpenAPI.Paths[route].Get != nil
@@ -1210,47 +1072,46 @@ func (p *parser) routeAndMethodExist(route string, method string) bool {
 	return false
 }
 
-func (p *parser) parseRouteComment(operation *OperationObject, comment string) error {
-	sourceString := strings.TrimSpace(comment[len("@Router"):])
-
-	// /path [method]
-	re := regexp.MustCompile(`([\w\.\/\-{}]+)[^\[]+\[([^\]]+)`)
-	matches := re.FindStringSubmatch(sourceString)
-	if len(matches) != 3 {
-		return fmt.Errorf("can not parse router comment \"%s\", skipped", comment)
+func (p *parser) parseRouteComment(operation *openapi.OperationObject, comment string) error {
+	spec, err := annotate.ParseRouteComment(comment)
+	if err != nil {
+		return err
 	}
 
-	_, ok := p.OpenAPI.Paths[matches[1]]
-	if !ok {
-		p.OpenAPI.Paths[matches[1]] = &PathItemObject{}
-	} else if p.routeAndMethodExist(matches[1], matches[2]) {
-		return fmt.Errorf("already exists, %q [%q]", matches[1], matches[2])
+	route := spec.Path
+	method := spec.Method
+
+	pi, ok := p.OpenAPI.Paths[route]
+	if !ok || pi == nil {
+		p.OpenAPI.Paths[route] = &openapi.PathItemObject{}
+	} else if p.routeAndMethodExist(route, method) {
+		return fmt.Errorf("already exists, %q [%q]", route, method)
 	}
 
-	switch strings.ToUpper(matches[2]) {
+	switch strings.ToUpper(method) {
 	case http.MethodGet:
-		p.OpenAPI.Paths[matches[1]].Get = operation
+		p.OpenAPI.Paths[route].Get = operation
 	case http.MethodPost:
-		p.OpenAPI.Paths[matches[1]].Post = operation
+		p.OpenAPI.Paths[route].Post = operation
 	case http.MethodPatch:
-		p.OpenAPI.Paths[matches[1]].Patch = operation
+		p.OpenAPI.Paths[route].Patch = operation
 	case http.MethodPut:
-		p.OpenAPI.Paths[matches[1]].Put = operation
+		p.OpenAPI.Paths[route].Put = operation
 	case http.MethodDelete:
-		p.OpenAPI.Paths[matches[1]].Delete = operation
+		p.OpenAPI.Paths[route].Delete = operation
 	case http.MethodOptions:
-		p.OpenAPI.Paths[matches[1]].Options = operation
+		p.OpenAPI.Paths[route].Options = operation
 	case http.MethodHead:
-		p.OpenAPI.Paths[matches[1]].Head = operation
+		p.OpenAPI.Paths[route].Head = operation
 	case http.MethodTrace:
-		p.OpenAPI.Paths[matches[1]].Trace = operation
+		p.OpenAPI.Paths[route].Trace = operation
 	}
 
 	return nil
 }
 
-func (p *parser) getSchemaObjectCached(pkgPath, pkgName, typeName string) (*SchemaObject, error) {
-	var schemaObject *SchemaObject
+func (p *parser) getSchemaObjectCached(pkgPath, pkgName, typeName string) (*openapi.SchemaObject, error) {
+	var schemaObject *openapi.SchemaObject
 
 	// see if we've already parsed this type
 	if knownObj, ok := p.KnownIDSchema[p.genSchemaObjectID(pkgName, typeName)]; ok {
@@ -1297,7 +1158,7 @@ func trimSplit(csl string) []string {
 	return s
 }
 
-func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaObject, error) {
+func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*openapi.SchemaObject, error) {
 	re := regexp.MustCompile(`(?i)(oneOf|anyOf|allOf|not)\(([^\)]*)\)`)
 	matches := re.FindStringSubmatch(typeName)
 	if len(matches) < 3 {
@@ -1314,7 +1175,7 @@ func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaO
 		return nil, fmt.Errorf("invalid number of arguments for not compound type, expected 1 received %d", len(args))
 	}
 
-	var sobs []*SchemaObject
+	var sobs []*openapi.SchemaObject
 	for i := range args {
 		result, err := p.parseBodyType(pkgPath, pkgName, args[i])
 		if err != nil {
@@ -1323,7 +1184,7 @@ func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaO
 		sobs = append(sobs, result)
 	}
 
-	sob := &SchemaObject{}
+	sob := &openapi.SchemaObject{}
 	switch op {
 	case "not":
 		sob.Not = sobs[0]
@@ -1340,10 +1201,10 @@ func (p *parser) handleCompoundType(pkgPath, pkgName, typeName string) (*SchemaO
 	return sob, nil
 }
 
-func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register bool) (*SchemaObject, error) {
+func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register bool) (*openapi.SchemaObject, error) {
 	var typeSpec *ast.TypeSpec
 	var exist bool
-	var schemaObject SchemaObject
+	var schemaObject openapi.SchemaObject
 
 	// handler basic and some specific typeName
 	if strings.HasPrefix(typeName, "[]") {
@@ -1351,7 +1212,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		itemTypeName := typeName[2:]
 		schema, ok := p.KnownIDSchema[p.genSchemaObjectID(pkgName, itemTypeName)]
 		if ok {
-			schemaObject.Items = &SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
+			schemaObject.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
 			return &schemaObject, nil
 		}
 
@@ -1361,7 +1222,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		}
 
 		if newParsedSchema.ID != "" {
-			schemaObject.Items = &SchemaObject{Ref: addSchemaRefLinkPrefix(newParsedSchema.ID)}
+			schemaObject.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(newParsedSchema.ID)}
 			return &schemaObject, nil
 		}
 
@@ -1372,7 +1233,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		itemTypeName := typeName[5:]
 		schema, ok := p.KnownIDSchema[p.genSchemaObjectID(pkgName, itemTypeName)]
 		if ok {
-			schemaObject.AdditionalProperties = &SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
+			schemaObject.AdditionalProperties = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
 			return &schemaObject, nil
 		}
 		schemaProperty, err := p.parseSchemaObject(pkgPath, pkgName, itemTypeName, true)
@@ -1490,7 +1351,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		}
 	} else if astArrayType, ok := typeSpec.Type.(*ast.ArrayType); ok {
 		schemaObject.Type = &arrayType
-		schemaObject.Items = &SchemaObject{}
+		schemaObject.Items = &openapi.SchemaObject{}
 		typeAsString := p.getTypeAsString(astArrayType.Elt)
 		typeAsString = strings.TrimLeft(typeAsString, "*")
 
@@ -1511,7 +1372,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		}
 	} else if astMapType, ok := typeSpec.Type.(*ast.MapType); ok {
 		schemaObject.Type = &objectType
-		propertySchema := &SchemaObject{}
+		propertySchema := &openapi.SchemaObject{}
 		schemaObject.AdditionalProperties = propertySchema
 		typeAsString := p.getTypeAsString(astMapType.Value)
 		typeAsString = strings.TrimLeft(typeAsString, "*")
@@ -1558,7 +1419,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 	} else if _, ok := typeSpec.Type.(*ast.InterfaceType); ok {
 		// free form object since the interface can be "anything"
 		schemaObject.Type = &objectType
-		schemaObject.AdditionalProperties = &SchemaObject{}
+		schemaObject.AdditionalProperties = &openapi.SchemaObject{}
 	}
 
 	// we don't want to register 3rd party library types
@@ -1598,14 +1459,14 @@ func (p *parser) getTypeSpec(pkgName, typeName string) (*ast.TypeSpec, bool) {
 	return astTypeSpec, true
 }
 
-func (p *parser) parseAstFields(pkgPath, pkgName string, structSchema *SchemaObject, astFields []*ast.Field) {
+func (p *parser) parseAstFields(pkgPath, pkgName string, structSchema *openapi.SchemaObject, astFields []*ast.Field) {
 	for _, astField := range astFields {
 		p.parseAstField(pkgPath, pkgName, structSchema, astField)
 	}
 }
 
-func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *SchemaObject, astField *ast.Field) {
-	fieldSchema := &SchemaObject{}
+func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *openapi.SchemaObject, astField *ast.Field) {
+	fieldSchema := &openapi.SchemaObject{}
 	typeAsString := p.getTypeAsString(astField.Type)
 	if renderedStruct := parseOverrideStructTag(astField); renderedStruct != "" {
 		typeAsString = renderedStruct
@@ -1673,7 +1534,7 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *SchemaObje
 				}
 				for _, propertyName := range refSchema.Properties.Keys() {
 					refPropertySchema, _ := refSchema.Properties.Get(propertyName)
-					_, disabled := structSchema.DisabledFieldNames[refPropertySchema.(*SchemaObject).FieldName]
+					_, disabled := structSchema.DisabledFieldNames[refPropertySchema.(*openapi.SchemaObject).FieldName]
 					if disabled {
 						return
 					}
@@ -1705,7 +1566,7 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *SchemaObje
 	}
 }
 
-func (p *parser) parseSchemaPropertiesFromStructFields(pkgPath, pkgName string, structSchema *SchemaObject, astFields []*ast.Field) {
+func (p *parser) parseSchemaPropertiesFromStructFields(pkgPath, pkgName string, structSchema *openapi.SchemaObject, astFields []*ast.Field) {
 	if astFields == nil {
 		return
 	}
@@ -1758,7 +1619,7 @@ func parseOverrideStructTag(astField *ast.Field) (renderedStructName string) {
 	return renderedStructName
 }
 
-func parseStructTags(astField *ast.Field, structSchema *SchemaObject, fieldSchema *SchemaObject, name string) (newName string, skip bool) {
+func parseStructTags(astField *ast.Field, structSchema *openapi.SchemaObject, fieldSchema *openapi.SchemaObject, name string) (newName string, skip bool) {
 	if astField.Tag != nil {
 		astFieldTag := reflect.StructTag(strings.Trim(astField.Tag.Value, "`"))
 		tagText := ""
@@ -1904,12 +1765,12 @@ func sortedFileKeys(m map[string]*ast.File) []string {
 	return keys
 }
 
-func setNestedFieldSchemaProps(valuePrefix, typeAsString string, fieldSchema, structSchema *SchemaObject) {
+func setNestedFieldSchemaProps(valuePrefix, typeAsString string, fieldSchema, structSchema *openapi.SchemaObject) {
 	if strings.HasPrefix(valuePrefix, "map") {
 		fieldSchema.Type = &objectType
-		fieldSchema.AdditionalProperties = &SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
+		fieldSchema.AdditionalProperties = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
 	} else {
 		fieldSchema.Type = &arrayType
-		fieldSchema.Items = &SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
+		fieldSchema.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
 	}
 }

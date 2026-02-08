@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/delley/goas/internal/openapi"
 )
 
 func isMainFile(path string) bool {
@@ -180,7 +182,7 @@ func replaceBackslash(origin string) string {
 }
 
 // checkFormatInt64 will see if the type is int64 and add to Format property if true
-func checkFormatInt64(typeName string, schemaObject *SchemaObject) {
+func checkFormatInt64(typeName string, schemaObject *openapi.SchemaObject) {
 	if typeName == "int64" {
 		schemaObject.Format = "int64"
 	}
