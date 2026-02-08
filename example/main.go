@@ -15,7 +15,6 @@ package main
 // @Tags "Bar" "Baz"
 // @Tags "Vfoo"
 // @Tags "Foo With Spaces"
-
 func main() {
 
 }
