@@ -1,4 +1,4 @@
-package goas
+package engine
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 )
 
 func setupParser() (*parser, error) {
-	return newParser("example/", "example/main.go", "", "", false, true, false)
+	return newParser("../../example/", "../../example/main.go", "", "", false, true, false)
 }
 func TestExample(t *testing.T) {
 	p, err := setupParser()
@@ -25,12 +25,12 @@ func TestExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := os.ReadFile("./example/example.json")
+	expected, _ := os.ReadFile("../../example/example.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
 func TestShowHiddenExample(t *testing.T) {
-	p, err := newParser("example/", "example/main.go", "", "", false, true, true)
+	p, err := newParser("../../example/", "../../example/main.go", "", "", false, true, true)
 	require.NoError(t, err)
 
 	err = p.parse()
@@ -39,7 +39,7 @@ func TestShowHiddenExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := os.ReadFile("./example/example-show-hidden.json")
+	expected, _ := os.ReadFile("../../example/example-show-hidden.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
@@ -285,7 +285,7 @@ func Test_explodeRefs(t *testing.T) {
 
 func Test_fetchRef(t *testing.T) {
 	t.Run("fetches local file ref", func(t *testing.T) {
-		desc, err := fetchRef(".", "$ref:file://example/example.md")
+		desc, err := fetchRef(".", "$ref:file://../../example/example.md")
 		require.NoError(t, err)
 
 		require.Equal(t, "Example description", desc)
@@ -374,7 +374,7 @@ func Test_genSchemaObjectID(t *testing.T) {
 		require.Equal(t, "sample", string(result))
 	})
 	t.Run("omit package name", func(t *testing.T) {
-		p, err := newParser("example/", "example/main.go", "", "", false, true, false)
+		p, err := newParser("../../example/", "../../example/main.go", "", "", false, true, false)
 		require.NoError(t, err)
 
 		result := p.genSchemaObjectID("test.sample", "sample")
