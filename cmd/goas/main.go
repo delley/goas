@@ -78,6 +78,14 @@ func action(c *cli.Context) error {
 	return gen.GenerateTo(context.Background(), opts, w)
 }
 
+func before(c *cli.Context) error {
+	if c.NArg() == 0 && len(os.Args) == 1 {
+		_ = cli.ShowAppHelp(c)
+		return cli.NewExitError("", 0)
+	}
+	return nil
+}
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "goas"
@@ -85,16 +93,21 @@ func main() {
 	app.UsageText = "goas [options]"
 	app.Version = version
 	app.Copyright = "(c) 2026 delley.fx@gmail.com"
-	app.HideHelp = true
+
+	app.HideHelp = false
+
 	app.OnUsageError = func(c *cli.Context, err error, isSubcommand bool) error {
 		cli.ShowAppHelp(c)
 		return nil
 	}
+
 	app.Flags = flags
+
+	app.Before = before
+
 	app.Action = action
 
-	err := app.Run(os.Args)
-	if err != nil {
+	if err := app.Run(os.Args); err != nil {
 		log.Fatal("Error: ", err)
 	}
 }
