@@ -1,12 +1,12 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "LaunchDarkly REST API",
-    "description": "Build custom integrations with the LaunchDarkly REST API",
+    "title": "Delley REST API",
+    "description": "Build custom integrations with the Delley REST API",
     "contact": {
-      "name": "LaunchDarkly Technical Support Team",
-      "url": "https://support.launchdarkly.com",
-      "email": "support@launchdarkly.com"
+      "name": "Delley Technical Support Team",
+      "url": "https://support.delley.com",
+      "email": "support@delley.com"
     },
     "license": {
       "name": "Apache 2.0",
@@ -16,7 +16,7 @@
   },
   "servers": [
     {
-      "url": "https://app.launchdarkly.com"
+      "url": "https://api.delley.com"
     }
   ],
   "paths": {

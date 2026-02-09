@@ -1,15 +1,10 @@
-# Archived!!
-This repository is no longer maintained. If you're a LaunchDarkly team member looking to work on goas reach out to the docs team for more info.
-
 # goas
 The project is based on  
 - [yvasiyarov/swagger](https://github.com/yvasiyarov/swagger) repository.  
 - [uudashr/go-module](https://github.com/uudashr/go-module) repository. (currently deprecated)
-- [mikunalpha/goas](https://github.com/mikunalpha/goas) repository
-- [nicocesar/goas](https://github.com/nicocesar/goas) repository
-
-This fork adapts the goas library for LaunchDarkly's API.
-
+- [mikunalpha/goas](https://github.com/mikunalpha/goas) repository.
+- [nicocesar/goas](https://github.com/nicocesar/goas) repository.
+- [launchdarkly/goas](https://github.com/launchdarkly/goas) repository. (currently archived)
 
 Generate [OpenAPI Specification](https://swagger.io/specification) json file with comments in Go.
 
@@ -20,7 +15,7 @@ Generate [OpenAPI Specification](https://swagger.io/specification) json file wit
 ## Install
 
 ```
-go get -u github.com/launchdarkly/goas
+go get -u github.com/delley/goas
 ```
 
 ## Usage
