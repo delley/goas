@@ -17,12 +17,12 @@ type OperationMeta struct {
 	Description string
 	Tags        []string
 	Deprecated  bool
-	Security    []map[string][]string // compatível com OpenAPI (security requirement)
+	Security    []map[string][]string
 }
 
 type ParamSpec struct {
 	Name        string
-	In          string // "query", "path", "header", "cookie"
+	In          string
 	Required    bool
 	Description string
 	GoType      string
@@ -30,8 +30,8 @@ type ParamSpec struct {
 }
 
 type ResponseSpec struct {
-	Status      string // mantemos string porque o engine usa map[string]...
-	JSONType    string // pode ser "" se não informado
-	GoType      string // normalizado ([] em vez de [x]) ou "" se não informado
-	Description string // sem aspas (trim de ")
+	Status      string
+	JSONType    string
+	GoType      string
+	Description string
 }

@@ -1,4 +1,4 @@
-package engine
+package goas
 
 import (
 	"encoding/json"
@@ -261,39 +261,7 @@ func (p *parser) parse() error {
 	return nil
 }
 
-func (p *parser) CreateOASFile(path string) error {
-	if err := p.parse(); err != nil {
-		return err
-	}
-
-	conflicts := p.validateSchemaNames()
-	if len(conflicts) > 0 {
-		return fmt.Errorf("conflicting schema names - %s", strings.Join(conflicts, ", "))
-	}
-
-	fd, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("can not create the file %s: %v", path, err)
-	}
-	defer fd.Close()
-
-	// for descriptions specified with $refs, pull that content in and embed it directly
-	// TODO may be a good idea to make this optional via clarg
-	err = desc.ExplodeRefs(p.FileRefPath, &p.OpenAPI)
-	if err != nil {
-		return err
-	}
-
-	output, err := openapi.Marshal(&p.OpenAPI, openapi.MarshalOptions{Indent: "  "})
-	if err != nil {
-		return err
-	}
-	_, err = fd.WriteString(string(output))
-
-	return err
-}
-
-func (p *parser) validateSchemaNames() []string {
+func (p *parser) validateSchemaNames() error {
 	potentialConflictsMap := map[string][]string{}
 	for pkgName, schemaNames := range p.ApiSchemaNames {
 		for typeName, schemaName := range schemaNames {
@@ -306,7 +274,11 @@ func (p *parser) validateSchemaNames() []string {
 			conflicts = append(conflicts, schemaName+": "+strings.Join(potentialConflictsMap[schemaName], " | "))
 		}
 	}
-	return conflicts
+
+	if len(conflicts) > 0 {
+		return fmt.Errorf("conflicting schema names - %s", strings.Join(conflicts, ", "))
+	}
+	return nil
 }
 
 func (p *parser) parseEntryPoint() error {

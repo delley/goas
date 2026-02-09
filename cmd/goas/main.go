@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
 
-	gen "github.com/delley/goas/goas"
+	"github.com/delley/goas/goas"
 	"github.com/urfave/cli"
 )
 
@@ -52,7 +53,7 @@ var flags = []cli.Flag{
 }
 
 func action(c *cli.Context) error {
-	opts := gen.Options{
+	opts := goas.Options{
 		ModulePath:   c.GlobalString("module-path"),
 		MainFilePath: c.GlobalString("main-file-path"),
 		HandlerPath:  c.GlobalString("handler-path"),
@@ -63,17 +64,27 @@ func action(c *cli.Context) error {
 		ShowHidden:   c.GlobalBool("show-hidden"),
 	}
 
-	g := gen.New()
-	return g.GenerateTo(context.Background(), opts, nil)
+	var w io.Writer = os.Stdout
+	if opts.OutputPath != "" && opts.OutputPath != "-" {
+		f, err := os.Create(opts.OutputPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+
+	gen := goas.New()
+	return gen.GenerateTo(context.Background(), opts, w)
 }
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "goas"
 	app.Usage = ""
-	// app.UsageText = "goas [options]"
+	app.UsageText = "goas [options]"
 	app.Version = version
-	app.Copyright = "(c) 2018 mikun800527@gmail.com"
+	app.Copyright = "(c) 2026 delley.fx@gmail.com"
 	app.HideHelp = true
 	app.OnUsageError = func(c *cli.Context, err error, isSubcommand bool) error {
 		cli.ShowAppHelp(c)

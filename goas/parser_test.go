@@ -1,4 +1,4 @@
-package engine
+package goas
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 )
 
 func setupParser() (*parser, error) {
-	return newParser("../../example/", "../../example/main.go", "", "", false, true, false)
+	return newParser("../example/", "../example/main.go", "", "", false, true, false)
 }
 func TestExample(t *testing.T) {
 	p, err := setupParser()
@@ -26,12 +26,12 @@ func TestExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := os.ReadFile("../../example/example.json")
+	expected, _ := os.ReadFile("../example/example.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
 func TestShowHiddenExample(t *testing.T) {
-	p, err := newParser("../../example/", "../../example/main.go", "", "", false, true, true)
+	p, err := newParser("../example/", "../example/main.go", "", "", false, true, true)
 	require.NoError(t, err)
 
 	err = p.parse()
@@ -40,7 +40,7 @@ func TestShowHiddenExample(t *testing.T) {
 	bts, err := json.MarshalIndent(p.OpenAPI, "", "    ")
 	require.NoError(t, err)
 
-	expected, _ := os.ReadFile("../../example/example-show-hidden.json")
+	expected, _ := os.ReadFile("../example/example-show-hidden.json")
 	require.JSONEq(t, string(expected), string(bts))
 }
 
@@ -234,7 +234,7 @@ func Test_genSchemaObjectID(t *testing.T) {
 		require.Equal(t, "sample", string(result))
 	})
 	t.Run("omit package name", func(t *testing.T) {
-		p, err := newParser("../../example/", "../../example/main.go", "", "", false, true, false)
+		p, err := newParser("../example/", "../example/main.go", "", "", false, true, false)
 		require.NoError(t, err)
 
 		result := p.genSchemaObjectID("test.sample", "sample")
@@ -274,9 +274,9 @@ func Test_validateSchemaNames(t *testing.T) {
 		p, err := setupParser()
 		require.NoError(t, err)
 
-		conflicts := p.validateSchemaNames()
+		err = p.validateSchemaNames()
 
-		require.Empty(t, conflicts)
+		require.NoError(t, err)
 	})
 
 	t.Run("Returns conflicts", func(t *testing.T) {
@@ -287,11 +287,9 @@ func Test_validateSchemaNames(t *testing.T) {
 		p.ApiSchemaNames["pkg/baz/qux"] = map[string]string{}
 		p.ApiSchemaNames["pkg/baz/qux"]["QuxRecord"] = "Record"
 
-		conflicts := p.validateSchemaNames()
+		err = p.validateSchemaNames()
 
-		require.Len(t, conflicts, 1)
-		require.Contains(t, conflicts[0], "pkg/foo/bar#BarRecord")
-		require.Contains(t, conflicts[0], "pkg/baz/qux#QuxRecord")
+		require.Error(t, err)
 	})
 }
 

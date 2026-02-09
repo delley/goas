@@ -1,4 +1,4 @@
-package engine
+package goas
 
 import (
 	"log"
@@ -83,10 +83,6 @@ var goTypesOASFormats = map[string]string{
 	"string":  "string",
 }
 
-// var typeDefTranslations = map[string]string{}
-
-// var modelNamesPackageNames = map[string]string{}
-
 func addSchemaRefLinkPrefix(name string) string {
 	if name == "" {
 		log.Fatalln("schema does not reference valid name")
@@ -96,31 +92,6 @@ func addSchemaRefLinkPrefix(name string) string {
 	}
 	return replaceBackslash("#/components/schemas/" + name)
 }
-
-// func getAliasedPackageName(pkgName string, aliases map[string]string) string {
-// 	pkgNameParsed := replaceBackslash(pkgName)
-// 	pkgNameParts := strings.Split(pkgNameParsed, "/")
-// 	lastPart := pkgNameParts[len(pkgNameParts)-1]
-// 	if val, ok := aliases[lastPart]; ok {
-// 		return val
-// 	} else {
-// 		return pkgNameParsed
-// 	}
-// }
-
-// func getAliasedTypeName(typeName string, aliases map[string]string) string {
-// 	typeNameParts := strings.Split(typeName, ".")
-// 	firstPart := typeNameParts[0]
-// 	if val, ok := aliases[firstPart]; ok {
-// 		if val != "" {
-// 			return fmt.Sprintf("%s.%s", val, typeNameParts[len(typeNameParts)-1])
-// 		} else {
-// 			return typeNameParts[len(typeNameParts)-1]
-// 		}
-// 	}
-
-// 	return typeName
-// }
 
 func replaceBackslash(origin string) string {
 	return strings.ReplaceAll(origin, "\\", "/")

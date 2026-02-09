@@ -2,9 +2,10 @@ package goas
 
 import (
 	"context"
+	"errors"
 	"io"
 
-	"github.com/delley/goas/internal/engine"
+	"github.com/delley/goas/internal/openapi"
 )
 
 type Generator struct{}
@@ -14,10 +15,28 @@ func New() *Generator {
 }
 
 func (g *Generator) GenerateTo(ctx context.Context, opt Options, w io.Writer) error {
-	p, err := engine.NewParser(opt.ModulePath, opt.MainFilePath, opt.HandlerPath, opt.FileRefPath, opt.Debug, opt.OmitPackages, opt.ShowHidden)
+	if w == nil {
+		return errors.New("nil writer")
+	}
+
+	spec, err := buildSpec(ctx, opt)
 	if err != nil {
 		return err
 	}
 
-	return p.CreateOASFile(opt.OutputPath)
+	b, err := openapi.Marshal(spec, openapi.MarshalOptions{Indent: "  "})
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(b)
+	return err
+}
+
+func Generate(ctx context.Context, opt Options) ([]byte, error) {
+	spec, err := buildSpec(ctx, opt)
+	if err != nil {
+		return nil, err
+	}
+	return openapi.Marshal(spec, openapi.MarshalOptions{Indent: "  "})
 }
