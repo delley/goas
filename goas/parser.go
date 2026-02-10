@@ -544,18 +544,11 @@ func (p *parser) parseGoMod() error {
 }
 
 func (p *parser) parseGoRoot() error {
-	walker := func(path string, info os.FileInfo, err error) error {
-		if info != nil && info.IsDir() {
-			fns, err := filepath.Glob(filepath.Join(path, "*.go"))
-			if len(fns) == 0 || err != nil {
-				return nil
-			}
-			name := strings.TrimPrefix(filepath.ToSlash(strings.TrimPrefix(path, p.GoRootSrcPath)), "/")
-			p.CorePkgs[name] = true
-		}
-		return nil
+	core, err := load.CorePackages(p.GoRootSrcPath)
+	if err != nil {
+		return err
 	}
-	filepath.Walk(p.GoRootSrcPath, walker)
+	p.CorePkgs = core
 	return nil
 }
 
