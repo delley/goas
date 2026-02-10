@@ -19,12 +19,7 @@ func (g *Generator) GenerateTo(ctx context.Context, opt Options, w io.Writer) er
 		return errors.New("nil writer")
 	}
 
-	spec, err := buildSpec(ctx, opt)
-	if err != nil {
-		return err
-	}
-
-	b, err := openapi.Marshal(spec, openapi.MarshalOptions{Indent: "  "})
+	b, err := g.Generate(ctx, opt)
 	if err != nil {
 		return err
 	}
@@ -33,7 +28,7 @@ func (g *Generator) GenerateTo(ctx context.Context, opt Options, w io.Writer) er
 	return err
 }
 
-func Generate(ctx context.Context, opt Options) ([]byte, error) {
+func (g *Generator) Generate(ctx context.Context, opt Options) ([]byte, error) {
 	spec, err := buildSpec(ctx, opt)
 	if err != nil {
 		return nil, err
