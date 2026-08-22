@@ -10,15 +10,15 @@ import (
 )
 
 type schemaRegistry struct {
-	omitPackages bool
-	knownIDSchema map[string]*openapi.SchemaObject
+	omitPackages   bool
+	knownIDSchema  map[string]*openapi.SchemaObject
 	apiSchemaNames map[string]map[string]string
 }
 
 func newSchemaRegistry(omitPackages bool) *schemaRegistry {
 	return &schemaRegistry{
-		omitPackages:  omitPackages,
-		knownIDSchema: map[string]*openapi.SchemaObject{},
+		omitPackages:   omitPackages,
+		knownIDSchema:  map[string]*openapi.SchemaObject{},
 		apiSchemaNames: map[string]map[string]string{},
 	}
 }

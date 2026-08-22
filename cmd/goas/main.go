@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
-	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/delley/goas/goas"
 	"github.com/urfave/cli"
@@ -65,37 +67,63 @@ func optionsFromContext(c *cli.Context) goas.Options {
 	}
 }
 
-func outputWriter(opts goas.Options) (io.Writer, func(), error) {
+func outputWriter(opts goas.Options) (io.Writer, string, func(), error) {
 	if opts.OutputPath == "" || opts.OutputPath == "-" {
-		return os.Stdout, func() {}, nil
+		return os.Stdout, "", func() {}, nil
 	}
 
-	f, err := os.Create(opts.OutputPath)
+	dir := filepath.Dir(opts.OutputPath)
+	if dir == "" {
+		dir = "."
+	}
+
+	f, err := os.CreateTemp(dir, ".goas-*.tmp")
 	if err != nil {
-		return nil, nil, err
+		return nil, "", nil, err
 	}
-
-	return f, func() {
+	return f, f.Name(), func() {
 		_ = f.Close()
+		_ = os.Remove(f.Name())
 	}, nil
 }
 
 func action(c *cli.Context) error {
+	if c.NArg() == 0 && len(os.Args) == 1 {
+		return nil
+	}
+
 	opts := optionsFromContext(c)
-	w, cleanup, err := outputWriter(opts)
+	if opts.OutputPath == "" || opts.OutputPath == "-" {
+		gen := goas.New()
+		return gen.GenerateTo(context.Background(), opts, os.Stdout)
+	}
+
+	w, tmpPath, cleanup, err := outputWriter(opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
 	gen := goas.New()
-	return gen.GenerateTo(context.Background(), opts, w)
+	if err := gen.GenerateTo(context.Background(), opts, w); err != nil {
+		return err
+	}
+	if err := w.(*os.File).Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
+		return err
+	}
+	cleanup() // remove residual temp when rename fails; otherwise tmp no longer exists
+	return nil
 }
 
 func before(c *cli.Context) error {
 	if c.NArg() == 0 && len(os.Args) == 1 {
-		_ = cli.ShowAppHelp(c)
-		return cli.NewExitError("", 0)
+		if err := cli.ShowAppHelp(c); err != nil {
+			return err
+		}
+		return nil
 	}
 	return nil
 }
@@ -112,14 +140,34 @@ func newApp() *cli.App {
 	app.Before = before
 	app.Action = action
 	app.OnUsageError = func(c *cli.Context, err error, isSubcommand bool) error {
-		_ = cli.ShowAppHelp(c)
-		return nil
+		if helpErr := cli.ShowAppHelp(c); helpErr != nil {
+			return errors.Join(err, helpErr)
+		}
+		return err
 	}
 	return app
 }
 
-func main() {
-	if err := newApp().Run(os.Args); err != nil {
-		log.Fatal("Error: ", err)
+func run(args []string, stdout, stderr io.Writer) int {
+	app := newApp()
+	app.Writer = stdout
+	app.ErrWriter = stderr
+
+	err := app.Run(args)
+	if err == nil {
+		return 0
 	}
+
+	code := 1
+	if exitErr, ok := err.(cli.ExitCoder); ok {
+		code = exitErr.ExitCode()
+	}
+	if err.Error() != "" {
+		_, _ = fmt.Fprintln(stderr, "Error:", err)
+	}
+	return code
+}
+
+func main() {
+	os.Exit(run(os.Args, os.Stdout, os.Stderr))
 }

@@ -87,7 +87,7 @@ func TestDeterministic(t *testing.T) {
 func Test_parseStructTags_handlesSingleQuotedTagLiteral(t *testing.T) {
 	field := &ast.Field{
 		Names: []*ast.Ident{{Name: "Example"}},
-		Tag: &ast.BasicLit{Value: "'json:\"doubleAlias\"'"},
+		Tag:   &ast.BasicLit{Value: "'json:\"doubleAlias\"'"},
 	}
 	structSchema := &openapi.SchemaObject{DisabledFieldNames: map[string]struct{}{}}
 	fieldSchema := &openapi.SchemaObject{}
