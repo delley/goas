@@ -104,9 +104,6 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunWithoutArgumentsShowsHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	originalArgs := os.Args
-	os.Args = []string{"goas"}
-	defer func() { os.Args = originalArgs }()
 
 	if got := run([]string{"goas"}, &stdout, &stderr); got != 0 {
 		t.Fatalf("run without arguments exit code = %d, want 0", got)

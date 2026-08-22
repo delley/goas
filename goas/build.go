@@ -7,6 +7,9 @@ import (
 	"github.com/delley/goas/internal/openapi"
 )
 
+// buildSpec is the generation orchestrator. It coordinates the internal
+// parser, schema validation, and reference expansion without exposing those
+// implementation details through the public Generator API.
 func buildSpec(ctx context.Context, opt Options) (*openapi.OpenAPIObject, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

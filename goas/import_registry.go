@@ -1,28 +1,19 @@
 package goas
 
-import "strings"
+import internalImports "github.com/delley/goas/internal/imports"
 
 type importRegistry struct {
+	registry                *internalImports.Registry
 	pkgNameImportedPkgAlias map[string]map[string][]string
 }
 
 func newImportRegistry() *importRegistry {
-	return &importRegistry{pkgNameImportedPkgAlias: map[string]map[string][]string{}}
+	registry := internalImports.NewRegistry()
+	return &importRegistry{registry: registry, pkgNameImportedPkgAlias: registry.PkgNameImportedPkgAlias}
 }
 
 func (r *importRegistry) recordImport(pkgName, importedPkgName, importedPkgAlias string) {
-	if r.pkgNameImportedPkgAlias[pkgName] == nil {
-		r.pkgNameImportedPkgAlias[pkgName] = map[string][]string{}
-	}
-	if _, ok := r.pkgNameImportedPkgAlias[pkgName][importedPkgAlias]; !ok {
-		r.pkgNameImportedPkgAlias[pkgName][importedPkgAlias] = []string{}
-	}
-	for _, v := range r.pkgNameImportedPkgAlias[pkgName][importedPkgAlias] {
-		if v == importedPkgName {
-			return
-		}
-	}
-	r.pkgNameImportedPkgAlias[pkgName][importedPkgAlias] = append(r.pkgNameImportedPkgAlias[pkgName][importedPkgAlias], importedPkgName)
+	r.registry.Record(pkgName, importedPkgName, importedPkgAlias)
 }
 
 func (r *importRegistry) importAliasFor(pkgName, importedPkgName string) string {
@@ -37,11 +28,10 @@ func (r *importRegistry) importAliasFor(pkgName, importedPkgName string) string 
 }
 
 func (r *importRegistry) resolveImportedPkgAlias(pkgName string, astImportPath string, astImportName *importName) string {
-	if astImportName != nil && astImportName.Name != "." && astImportName.Name != "_" {
-		return astImportName.String()
+	if astImportName == nil {
+		return internalImports.ResolveAlias(astImportPath, "")
 	}
-	s := strings.Split(astImportPath, "/")
-	return s[len(s)-1]
+	return internalImports.ResolveAlias(astImportPath, astImportName.Name)
 }
 
 type importName struct {

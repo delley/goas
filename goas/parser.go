@@ -25,6 +25,8 @@ import (
 	module "golang.org/x/mod/modfile"
 )
 
+// parser is the internal implementation of module discovery, annotation
+// parsing, and OpenAPI model construction. Callers should use Generator.
 type parser struct {
 	ctx context.Context
 
@@ -43,8 +45,7 @@ type parser struct {
 	OpenAPI openapi.OpenAPIObject
 
 	schemaRegistry *schemaRegistry
-	astCache       *astPackageCache
-	importRegistry *importRegistry
+	resources      *parseResources
 
 	CorePkgs      map[string]bool
 	KnownPkgs     []pkg
@@ -52,9 +53,7 @@ type parser struct {
 	KnownPathPkg  map[string]*pkg
 	KnownIDSchema map[string]*openapi.SchemaObject
 
-	TypeSpecs               map[string]map[string]*ast.TypeSpec
-	PkgPathAstPkgCache      map[string]map[string]*ast.Package
-	PkgNameImportedPkgAlias map[string]map[string][]string
+	TypeSpecs map[string]map[string]*ast.TypeSpec
 
 	// map of package name to type name to schema name
 	ApiSchemaNames map[string]map[string]string
@@ -70,12 +69,27 @@ type pkg struct {
 	Path string
 }
 
+type parseResources struct {
+	astCache       *astPackageCache
+	importRegistry *importRegistry
+}
+
+func newParseResources() *parseResources {
+	return &parseResources{
+		astCache:       newASTPackageCache(),
+		importRegistry: newImportRegistry(),
+	}
+}
+
 var (
 	objectType = "object"
 	stringType = "string"
 	arrayType  = "array"
 )
 
+// NewParser is retained for compatibility with existing package users. New
+// integrations should prefer Generator, which exposes the stable public
+// contract without exposing parser implementation details.
 func NewParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
 	return newParserContext(context.Background(), modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
 }
@@ -89,152 +103,47 @@ func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath
 		return nil, err
 	}
 	p := &parser{
-		ctx:                     ctx,
-		CorePkgs:                map[string]bool{},
-		KnownPkgs:               []pkg{},
-		KnownNamePkg:            map[string]*pkg{},
-		KnownPathPkg:            map[string]*pkg{},
-		KnownIDSchema:           map[string]*openapi.SchemaObject{},
-		TypeSpecs:               map[string]map[string]*ast.TypeSpec{},
-		PkgPathAstPkgCache:      map[string]map[string]*ast.Package{},
-		PkgNameImportedPkgAlias: map[string]map[string][]string{},
-		Debug:                   debug,
-		OmitPackages:            omitPackages,
-		ShowHidden:              showHidden,
-		FileRefPath:             descriptionRefPath,
+		ctx:           ctx,
+		CorePkgs:      map[string]bool{},
+		KnownPkgs:     []pkg{},
+		KnownNamePkg:  map[string]*pkg{},
+		KnownPathPkg:  map[string]*pkg{},
+		KnownIDSchema: map[string]*openapi.SchemaObject{},
+		TypeSpecs:     map[string]map[string]*ast.TypeSpec{},
+		Debug:         debug,
+		OmitPackages:  omitPackages,
+		ShowHidden:    showHidden,
+		FileRefPath:   descriptionRefPath,
 	}
-	p.astCache = newASTPackageCache()
-	p.importRegistry = newImportRegistry()
+	p.resources = newParseResources()
 	p.schemaRegistry = newSchemaRegistry(omitPackages)
 	p.KnownIDSchema = p.schemaRegistry.knownIDSchema
 	p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
-	p.PkgNameImportedPkgAlias = p.importRegistry.pkgNameImportedPkgAlias
 	p.OpenAPI.OpenAPI = openapi.OpenAPIVersion
 	p.OpenAPI.Paths = make(openapi.PathsObject)
 	p.OpenAPI.Security = []map[string][]string{}
 	p.OpenAPI.Components.Schemas = make(map[string]*openapi.SchemaObject)
 	p.OpenAPI.Components.SecuritySchemes = map[string]*openapi.SecuritySchemeObject{}
 
-	// check modulePath is exist
-	modulePath, _ = filepath.Abs(modulePath)
-	moduleInfo, err := os.Stat(modulePath)
+	moduleCtx, err := load.ResolveModuleContext(modulePath, mainFilePath, handlerPath, descriptionRefPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("cannot get information of %s: %s", modulePath, err)
+		return nil, err
 	}
-	if !moduleInfo.IsDir() {
-		return nil, fmt.Errorf("modulePath should be a directory")
-	}
-	p.ModulePath = modulePath
+	p.ModulePath = moduleCtx.ModulePath
 	p.debugf("module path: %s", p.ModulePath)
-
-	// check go.mod file is exist
-	goModFilePath := filepath.Join(modulePath, "go.mod")
-	goModFileInfo, err := os.Stat(goModFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("cannot get information of %s: %s", goModFilePath, err)
-	}
-	if goModFileInfo.IsDir() {
-		return nil, fmt.Errorf("%s should be a file", goModFilePath)
-	}
-	p.GoModFilePath = goModFilePath
+	p.GoModFilePath = moduleCtx.GoModFilePath
 	p.debugf("go.mod file path: %s", p.GoModFilePath)
-
-	// Relative input paths are resolved from the module root.
-	resolvePath := func(path string) string {
-		if path == "" || filepath.IsAbs(path) {
-			return path
-		}
-		return filepath.Join(modulePath, path)
-	}
-	mainFilePath = resolvePath(mainFilePath)
-	descriptionRefPath = resolvePath(descriptionRefPath)
-
-	// check mainFilePath is exist
-	if mainFilePath == "" {
-		fns, err := filepath.Glob(filepath.Join(modulePath, "*.go"))
-		if err != nil {
-			return nil, err
-		}
-		for _, fn := range fns {
-			isMain, err := load.IsMainFile(fn)
-			if err == nil && isMain {
-				mainFilePath = fn
-				break
-			}
-		}
-	} else {
-		mainFileInfo, err := os.Stat(mainFilePath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, err
-			}
-			return nil, fmt.Errorf("cannot get information of %s: %s", mainFilePath, err)
-		}
-		if mainFileInfo.IsDir() {
-			return nil, fmt.Errorf("mainFilePath should not be a directory")
-		}
-	}
-	p.MainFilePath = mainFilePath
+	p.MainFilePath = moduleCtx.MainFilePath
 	p.debugf("main file path: %s", p.MainFilePath)
-
-	// get module name from go.mod file
-	moduleName, err := load.ModuleNameFromGoMod(goModFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot get module name from %s: %w", goModFilePath, err)
-	}
-
-	p.ModuleName = moduleName
+	p.ModuleName = moduleCtx.ModuleName
 	p.debugf("module name: %s", p.ModuleName)
-
-	// Use the toolchain's configured cache. It may be created lazily later.
-	goModCachePath, err := load.GoModCache()
-	if err != nil {
-		return nil, fmt.Errorf("cannot get GOMODCACHE: %w", err)
-	}
-	p.GoModCachePath = goModCachePath
+	p.GoModCachePath = moduleCtx.GoModCachePath
 	p.debugf("go module cache path: %s", p.GoModCachePath)
-
-	goRoot, err := load.GoRoot()
-	if err != nil {
-		return nil, fmt.Errorf("cannot get GOROOT: %w", err)
-	}
-	goRootSrcPath := filepath.Join(goRoot, "src")
-	_, err = os.Stat(goRootSrcPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("cannot get information of %s: %s", goRootSrcPath, err)
-	}
-	if goRootSrcInfo, err := os.Stat(goRootSrcPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("cannot get information of %s: %s", goRootSrcPath, err)
-	} else if !goRootSrcInfo.IsDir() {
-		return nil, fmt.Errorf("%s should be a directory", goRootSrcPath)
-	}
-	p.GoRootSrcPath = goRootSrcPath
+	p.GoRootSrcPath = moduleCtx.GoRootSrcPath
 	p.debugf("go root src path: %s", p.GoRootSrcPath)
-
-	if handlerPath != "" {
-		handlerPath = resolvePath(handlerPath)
-		_, err := os.Stat(handlerPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, err
-			}
-			return nil, fmt.Errorf("cannot get information of %s: %s", handlerPath, err)
-		}
-	}
-	p.HandlerPath = handlerPath
+	p.HandlerPath = moduleCtx.HandlerPath
 	p.debugf("handler path: %s", p.HandlerPath)
+	p.FileRefPath = moduleCtx.FileRefPath
 
 	if p.ApiSchemaNames == nil {
 		p.ApiSchemaNames = map[string]map[string]string{}
@@ -243,6 +152,8 @@ func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath
 	return p, nil
 }
 
+// parse runs the internal parsing stages in dependency order. Keeping this
+// pipeline behind buildSpec prevents parser details from becoming public API.
 func (p *parser) parse() error {
 	if err := p.contextErr(); err != nil {
 		return err
@@ -588,18 +499,10 @@ func (p *parser) parseGoRoot() error {
 }
 
 func (p *parser) getPkgAst(pkgPath string) (map[string]*ast.Package, error) {
-	if p.astCache == nil {
-		p.astCache = newASTPackageCache()
+	if p.resources == nil {
+		p.resources = newParseResources()
 	}
-	if cache, ok := p.PkgPathAstPkgCache[pkgPath]; ok {
-		return cache, nil
-	}
-	astPackages, err := p.astCache.getPkgAst(pkgPath)
-	if err != nil {
-		return nil, err
-	}
-	p.PkgPathAstPkgCache[pkgPath] = astPackages
-	return astPackages, nil
+	return p.resources.astCache.getPkgAst(pkgPath)
 }
 
 func (p *parser) parseAPIs() error {
@@ -617,9 +520,8 @@ func (p *parser) parseAPIs() error {
 }
 
 func (p *parser) parseImportStatements() error {
-	if p.importRegistry == nil {
-		p.importRegistry = newImportRegistry()
-		p.PkgNameImportedPkgAlias = p.importRegistry.pkgNameImportedPkgAlias
+	if p.resources == nil {
+		p.resources = newParseResources()
 	}
 	for i := range p.KnownPkgs {
 		pkgPath := p.KnownPkgs[i].Path
@@ -639,11 +541,11 @@ func (p *parser) parseImportStatements() error {
 					importedPkgName := strings.Trim(astImport.Path.Value, "\"")
 					importedPkgAlias := ""
 					if astImport.Name != nil {
-						importedPkgAlias = p.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, &importName{Name: astImport.Name.Name})
+						importedPkgAlias = p.resources.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, &importName{Name: astImport.Name.Name})
 					} else {
-						importedPkgAlias = p.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, nil)
+						importedPkgAlias = p.resources.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, nil)
 					}
-					p.importRegistry.recordImport(pkgName, importedPkgName, importedPkgAlias)
+					p.resources.importRegistry.recordImport(pkgName, importedPkgName, importedPkgAlias)
 				}
 			}
 		}
@@ -1265,17 +1167,19 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		typeSpec, exist = p.getTypeSpec(guessPkgName, guessTypeName)
 		if !exist {
 			found := false
-			for k := range p.PkgNameImportedPkgAlias[pkgName] {
-				if k == guessPkgName && len(p.PkgNameImportedPkgAlias[pkgName][guessPkgName]) != 0 {
-					found = true
-					break
+			if p.resources != nil {
+				for k := range p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName] {
+					if k == guessPkgName && len(p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName][guessPkgName]) != 0 {
+						found = true
+						break
+					}
 				}
 			}
 			if !found {
 				p.debugf("unknown guess %s ast.TypeSpec in package %s", guessTypeName, guessPkgName)
 				return &schemaObject, nil
 			}
-			guessPkgName = p.PkgNameImportedPkgAlias[pkgName][guessPkgName][0]
+			guessPkgName = p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName][guessPkgName][0]
 			guessPkgPath = ""
 			for i := range p.KnownPkgs {
 				if guessPkgName == p.KnownPkgs[i].Name {

@@ -88,7 +88,7 @@ func outputWriter(opts goas.Options) (io.Writer, string, func(), error) {
 }
 
 func action(c *cli.Context) error {
-	if c.NArg() == 0 && len(os.Args) == 1 {
+	if c.NArg() == 0 && c.NumFlags() == 0 {
 		return nil
 	}
 
@@ -119,7 +119,7 @@ func action(c *cli.Context) error {
 }
 
 func before(c *cli.Context) error {
-	if c.NArg() == 0 && len(os.Args) == 1 {
+	if c.NArg() == 0 && c.NumFlags() == 0 {
 		if err := cli.ShowAppHelp(c); err != nil {
 			return err
 		}
