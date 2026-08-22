@@ -2,12 +2,74 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/delley/goas/goas"
+	"github.com/urfave/cli"
 )
 
+func TestOptionsFromContext(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]string
+		want   goas.Options
+	}{
+		{
+			name: "defaults",
+			want: goas.Options{
+				ModulePath:  ".",
+				FileRefPath: ".",
+				OutputPath:  "oas.json",
+			},
+		},
+		{
+			name: "explicit values",
+			values: map[string]string{
+				"module-path":    "./example",
+				"main-file-path": "./main.go",
+				"handler-path":   "./handlers",
+				"file-ref-path":  "./files",
+				"output":         "-",
+				"debug":          "true",
+				"omit-packages":  "true",
+				"show-hidden":    "true",
+			},
+			want: goas.Options{
+				ModulePath:   "./example",
+				MainFilePath: "./main.go",
+				HandlerPath:  "./handlers",
+				FileRefPath:  "./files",
+				OutputPath:   "-",
+				Debug:        true,
+				OmitPackages: true,
+				ShowHidden:   true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := flag.NewFlagSet(tt.name, flag.ContinueOnError)
+			for _, cliFlag := range flags {
+				cliFlag.Apply(set)
+			}
+			for name, value := range tt.values {
+				if err := set.Set(name, value); err != nil {
+					t.Fatalf("set %s: %v", name, err)
+				}
+			}
+
+			ctx := cli.NewContext(newApp(), set, nil)
+			if got := optionsFromContext(ctx); got != tt.want {
+				t.Fatalf("optionsFromContext() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
 func TestNewAppHelp(t *testing.T) {
 	var out bytes.Buffer
 	app := newApp()
@@ -129,6 +191,13 @@ func TestRunPreservesExistingFileOnGenerationFailure(t *testing.T) {
 	}
 }
 
+func TestOutputWriterReportsCreateError(t *testing.T) {
+	_, _, _, err := outputWriter(goas.Options{OutputPath: filepath.Join(t.TempDir(), "missing", "oas.json")})
+	if err == nil {
+		t.Fatal("outputWriter() error = nil, want error")
+	}
+}
+
 func TestRunWritesOutputAtomicallyOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "oas.json")
@@ -137,7 +206,7 @@ func TestRunWritesOutputAtomicallyOnSuccess(t *testing.T) {
 	args := []string{
 		"goas",
 		"--module-path", "../../example",
-		"--main-file-path", "../../example/main.go",
+		"--main-file-path", "main.go",
 		"--output", dest,
 	}
 	if got := run(args, &stdout, &stderr); got != 0 {

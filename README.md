@@ -15,7 +15,7 @@ Generate [OpenAPI Specification](https://swagger.io/specification) json file wit
 ## Install
 
 ```
-go get -u github.com/delley/goas
+go install github.com/delley/goas/cmd/goas@latest
 ```
 
 ## Usage
@@ -24,7 +24,7 @@ You can document your service by placing annotations inside your godoc at variou
 
 ### Service Description
 
-The service description comments can be located in any of your .go files. They provide general information about the service you are documenting.
+The service description comments must be in the entrypoint Go file selected by `--main-file-path`. If that flag is omitted, goas looks for a `main` package file directly under the module root. They provide general information about the service you are documenting.
 
 ```go
 // @Version 1.0.0
@@ -173,8 +173,8 @@ func PostUser() {
 @Resource {resource}
 @Resource users
 
-@Tag {tag}
-@tag xxx
+@Tags {tag}
+@Tags xxx
 ```
 - {resource}, {tag}: Tag of the route.
 
@@ -188,14 +188,37 @@ func PostUser() {
 
 ### Documentation Generation
 
-Go to the folder where is main.go in
-```
-// go.mod and main file are in the same directory
-goas --module-path . --output oas.json
+Paths passed to `--main-file-path`, `--handler-path` and `--file-ref-path` are resolved relative to `--module-path` (which defaults to `.`). The output path is resolved relative to the directory where the command is run. The default output is `oas.json`; use `--output -` to write the generated JSON to stdout.
 
-// go.mod and main file are in the different directory
+From the repository root, generate the included example to stdout:
+```
+go run ./cmd/goas --module-path ./example --main-file-path ./main.go --output -
+```
+
+From a module whose `go.mod` and main file are in the same directory:
+```
+goas --module-path . --output oas.json
+```
+
+From a module whose main file is in a different directory:
+```
 goas --module-path . --main-file-path ./cmd/xxx/main.go --output oas.json
 ```
+
+The entrypoint file must be under the module root or be provided explicitly with `--main-file-path`; service-level comments in other Go files are not read as global comments.
+
+### Command-line options
+
+|Option|Default|Description|
+|---|---|---|
+|`--module-path`|`.`|Module root to scan for annotations and `go.mod`|
+|`--main-file-path`|empty|Entrypoint Go file; when empty, auto-detect a `main` package file in the module root|
+|`--handler-path`|empty|Restrict handler comments to this path|
+|`--file-ref-path`|`.`|Base path for file references|
+|`--output`|`oas.json`|Output file, or `-` for stdout|
+|`--debug`|`false`|Show debug messages|
+|`--omit-packages`|`false`|Omit packages from schema names|
+|`--show-hidden`|`false`|Include paths in hidden packages|
 
 ## Local Development
 
@@ -207,8 +230,26 @@ Run `go test` in root directory to run unit tests.
 
 ### Build and run
 
-`go build` to build, then run `goas` as above. e.g. to run against the `example` application, from the `example` directory run:
+Build the command package explicitly. The output name must not be `goas`, because `goas` is also the library directory in the repository:
 
 ```
-../goas --module-path . --main-file-path ./main.go --output example.json
+go build -o ./goas-cli ./cmd/goas
 ```
+
+From the repository root, run it against the included `example` application:
+
+```
+./goas-cli --module-path ./example --main-file-path ./main.go --output ./example/example.json
+```
+
+Alternatively, from the `example` directory run the binary from its parent:
+
+```
+../goas-cli --module-path . --main-file-path ./main.go --output ./example.json
+```
+
+The module path is the base for relative `--main-file-path`, `--handler-path` and
+`--file-ref-path` values. Module dependencies are resolved using the Go toolchain's
+`GOMODCACHE` (`go env GOMODCACHE`); the cache directory does not need to exist when
+the generator starts. A cancelled generation context returns `context.Canceled` or
+`context.DeadlineExceeded` and does not write output.

@@ -1,6 +1,7 @@
 package goas
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -9,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -26,6 +26,8 @@ import (
 )
 
 type parser struct {
+	ctx context.Context
+
 	ModulePath string
 	ModuleName string
 
@@ -75,11 +77,19 @@ var (
 )
 
 func NewParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
-	return newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
+	return newParserContext(context.Background(), modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
 }
 
 func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
+	return newParserContext(context.Background(), modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
+}
+
+func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p := &parser{
+		ctx:                     ctx,
 		CorePkgs:                map[string]bool{},
 		KnownPkgs:               []pkg{},
 		KnownNamePkg:            map[string]*pkg{},
@@ -135,6 +145,16 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	p.GoModFilePath = goModFilePath
 	p.debugf("go.mod file path: %s", p.GoModFilePath)
 
+	// Relative input paths are resolved from the module root.
+	resolvePath := func(path string) string {
+		if path == "" || filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(modulePath, path)
+	}
+	mainFilePath = resolvePath(mainFilePath)
+	descriptionRefPath = resolvePath(descriptionRefPath)
+
 	// check mainFilePath is exist
 	if mainFilePath == "" {
 		fns, err := filepath.Glob(filepath.Join(modulePath, "*.go"))
@@ -172,29 +192,10 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 	p.ModuleName = moduleName
 	p.debugf("module name: %s", p.ModuleName)
 
-	// check go module cache path is exist ($GOPATH/pkg/mod)
-	goPath := os.Getenv("GOPATH")
-	// If GOPATH contains multiple paths use the last
-	// TODO: choosing the last is arbritrary; handle this better
-	goPathParts := strings.Split(goPath, ":")
-	goPath = goPathParts[len(goPathParts)-1]
-	if goPath == "" {
-		user, err := user.Current()
-		if err != nil {
-			return nil, fmt.Errorf("cannot get current user: %w", err)
-		}
-		goPath = filepath.Join(user.HomeDir, "go")
-	}
-	goModCachePath := filepath.Join(goPath, "pkg", "mod")
-	goModCacheInfo, err := os.Stat(goModCachePath)
+	// Use the toolchain's configured cache. It may be created lazily later.
+	goModCachePath, err := load.GoModCache()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("could not find goModCachePath: %w", err)
-		}
-		return nil, fmt.Errorf("cannot get information of %s: %s", goModCachePath, err)
-	}
-	if !goModCacheInfo.IsDir() {
-		return nil, fmt.Errorf("%s should be a directory", goModCachePath)
+		return nil, fmt.Errorf("cannot get GOMODCACHE: %w", err)
 	}
 	p.GoModCachePath = goModCachePath
 	p.debugf("go module cache path: %s", p.GoModCachePath)
@@ -211,14 +212,19 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 		}
 		return nil, fmt.Errorf("cannot get information of %s: %s", goRootSrcPath, err)
 	}
-	if !goModCacheInfo.IsDir() {
+	if goRootSrcInfo, err := os.Stat(goRootSrcPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("cannot get information of %s: %s", goRootSrcPath, err)
+	} else if !goRootSrcInfo.IsDir() {
 		return nil, fmt.Errorf("%s should be a directory", goRootSrcPath)
 	}
 	p.GoRootSrcPath = goRootSrcPath
 	p.debugf("go root src path: %s", p.GoRootSrcPath)
 
 	if handlerPath != "" {
-		handlerPath, _ = filepath.Abs(handlerPath)
+		handlerPath = resolvePath(handlerPath)
 		_, err := os.Stat(handlerPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -238,9 +244,15 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 }
 
 func (p *parser) parse() error {
+	if err := p.contextErr(); err != nil {
+		return err
+	}
 	// parse basic info
 	err := p.parseEntryPoint()
 	if err != nil {
+		return err
+	}
+	if err := p.contextErr(); err != nil {
 		return err
 	}
 
@@ -249,10 +261,16 @@ func (p *parser) parse() error {
 	if err != nil {
 		return err
 	}
+	if err := p.contextErr(); err != nil {
+		return err
+	}
 
 	// parse go.mod info
 	err = p.parseGoMod()
 	if err != nil {
+		return err
+	}
+	if err := p.contextErr(); err != nil {
 		return err
 	}
 
@@ -269,6 +287,13 @@ func (p *parser) parse() error {
 	}
 
 	return nil
+}
+
+func (p *parser) contextErr() error {
+	if p.ctx == nil {
+		return nil
+	}
+	return p.ctx.Err()
 }
 
 func (p *parser) validateSchemaNames() error {
@@ -450,6 +475,12 @@ func (p *parser) parseEntryPoint() error {
 
 func (p *parser) parseModule() error {
 	walker := func(path string, info os.FileInfo, err error) error {
+		if contextErr := p.contextErr(); contextErr != nil {
+			return contextErr
+		}
+		if err != nil {
+			return err
+		}
 		if info != nil && info.IsDir() {
 			if strings.HasPrefix(strings.Trim(strings.TrimPrefix(path, p.ModulePath), "/"), ".git") {
 				return nil
@@ -488,6 +519,9 @@ func (p *parser) parseGoMod() error {
 		return err
 	}
 	for i := range goMod.Require {
+		if err := p.contextErr(); err != nil {
+			return err
+		}
 		pathRunes := []rune{}
 		for _, v := range goMod.Require[i].Mod.Path {
 			if !unicode.IsUpper(v) {
@@ -508,6 +542,12 @@ func (p *parser) parseGoMod() error {
 		p.KnownPathPkg[pkgPath] = &p.KnownPkgs[len(p.KnownPkgs)-1]
 
 		walker := func(path string, info os.FileInfo, err error) error {
+			if contextErr := p.contextErr(); contextErr != nil {
+				return contextErr
+			}
+			if err != nil {
+				return err
+			}
 			if info != nil && info.IsDir() {
 				if strings.HasPrefix(strings.Trim(strings.TrimPrefix(path, p.ModulePath), "/"), ".git") {
 					return nil

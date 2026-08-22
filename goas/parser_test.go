@@ -1,11 +1,13 @@
 package goas
 
 import (
+	"context"
 	"encoding/json"
 	"go/ast"
 	"go/token"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -13,6 +15,25 @@ import (
 	"github.com/jarcoal/httpmock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGenerateCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := New().Generate(ctx, Options{ModulePath: "../example"})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestNewParserUsesToolchainModuleCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "not-created")
+	t.Setenv("GOPATH", filepath.Join(t.TempDir(), "not-gopath"))
+	t.Setenv("GOMODCACHE", cachePath)
+
+	p, err := newParser("../example", "main.go", "", "", false, true, false)
+	require.NoError(t, err)
+	require.Equal(t, cachePath, p.GoModCachePath)
+	require.Equal(t, filepath.Join(p.ModulePath, "main.go"), p.MainFilePath)
+}
 
 func setupParser() (*parser, error) {
 	return newParser("../example/", "../example/main.go", "", "", false, true, false)

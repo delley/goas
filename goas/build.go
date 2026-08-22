@@ -8,7 +8,10 @@ import (
 )
 
 func buildSpec(ctx context.Context, opt Options) (*openapi.OpenAPIObject, error) {
-	p, err := newParser(
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p, err := newParserContext(ctx,
 		opt.ModulePath,
 		opt.MainFilePath,
 		opt.HandlerPath,
@@ -24,12 +27,21 @@ func buildSpec(ctx context.Context, opt Options) (*openapi.OpenAPIObject, error)
 	if err := p.parse(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if err := p.validateSchemaNames(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	if err := desc.ExplodeRefs(p.FileRefPath, &p.OpenAPI); err != nil {
+	if err := desc.ExplodeRefsContext(ctx, p.FileRefPath, &p.OpenAPI); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 

@@ -1,6 +1,7 @@
 package desc
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -8,6 +9,13 @@ import (
 )
 
 func FetchRef(filePath, description string) (string, error) {
+	return FetchRefContext(context.Background(), filePath, description)
+}
+
+func FetchRefContext(ctx context.Context, filePath, description string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if !strings.HasPrefix(description, "$ref:") {
 		return description, nil
 	}
@@ -21,7 +29,11 @@ func FetchRef(filePath, description string) (string, error) {
 		return string(dat), nil
 	}
 	// else assume http and fetch
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
