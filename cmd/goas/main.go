@@ -10,7 +10,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-var version = "v1.0.0"
+const version = "v1.0.0"
 
 var flags = []cli.Flag{
 	cli.StringFlag{
@@ -52,27 +52,41 @@ var flags = []cli.Flag{
 	},
 }
 
-func action(c *cli.Context) error {
-	opts := goas.Options{
-		ModulePath:   c.GlobalString("module-path"),
-		MainFilePath: c.GlobalString("main-file-path"),
-		HandlerPath:  c.GlobalString("handler-path"),
-		FileRefPath:  c.GlobalString("file-ref-path"),
-		OutputPath:   c.GlobalString("output"),
-		Debug:        c.GlobalBool("debug"),
-		OmitPackages: c.GlobalBool("omit-packages"),
-		ShowHidden:   c.GlobalBool("show-hidden"),
+func optionsFromContext(c *cli.Context) goas.Options {
+	return goas.Options{
+		ModulePath:   c.String("module-path"),
+		MainFilePath: c.String("main-file-path"),
+		HandlerPath:  c.String("handler-path"),
+		FileRefPath:  c.String("file-ref-path"),
+		OutputPath:   c.String("output"),
+		Debug:        c.Bool("debug"),
+		OmitPackages: c.Bool("omit-packages"),
+		ShowHidden:   c.Bool("show-hidden"),
+	}
+}
+
+func outputWriter(opts goas.Options) (io.Writer, func(), error) {
+	if opts.OutputPath == "" || opts.OutputPath == "-" {
+		return os.Stdout, func() {}, nil
 	}
 
-	var w io.Writer = os.Stdout
-	if opts.OutputPath != "" && opts.OutputPath != "-" {
-		f, err := os.Create(opts.OutputPath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w = f
+	f, err := os.Create(opts.OutputPath)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	return f, func() {
+		_ = f.Close()
+	}, nil
+}
+
+func action(c *cli.Context) error {
+	opts := optionsFromContext(c)
+	w, cleanup, err := outputWriter(opts)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	gen := goas.New()
 	return gen.GenerateTo(context.Background(), opts, w)
@@ -86,28 +100,26 @@ func before(c *cli.Context) error {
 	return nil
 }
 
-func main() {
+func newApp() *cli.App {
 	app := cli.NewApp()
 	app.Name = "goas"
 	app.Usage = ""
 	app.UsageText = "goas [options]"
 	app.Version = version
 	app.Copyright = "(c) 2026 delley.fx@gmail.com"
-
 	app.HideHelp = false
-
+	app.Flags = flags
+	app.Before = before
+	app.Action = action
 	app.OnUsageError = func(c *cli.Context, err error, isSubcommand bool) error {
-		cli.ShowAppHelp(c)
+		_ = cli.ShowAppHelp(c)
 		return nil
 	}
+	return app
+}
 
-	app.Flags = flags
-
-	app.Before = before
-
-	app.Action = action
-
-	if err := app.Run(os.Args); err != nil {
+func main() {
+	if err := newApp().Run(os.Args); err != nil {
 		log.Fatal("Error: ", err)
 	}
 }

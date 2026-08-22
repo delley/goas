@@ -1,7 +1,6 @@
 package goas
 
 import (
-	"log"
 	"strings"
 
 	"github.com/delley/goas/internal/openapi"
@@ -85,7 +84,7 @@ var goTypesOASFormats = map[string]string{
 
 func addSchemaRefLinkPrefix(name string) string {
 	if name == "" {
-		log.Fatalln("schema does not reference valid name")
+		return ""
 	}
 	if strings.HasPrefix(name, "#/components/schemas/") {
 		return replaceBackslash(name)

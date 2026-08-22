@@ -1,6 +1,6 @@
 package openapi
 
-func (s *SecuritySchemeOauthObject) ApplyScopes(scopes map[string]string) {
+func (s *SecuritySchemeOAuthObject) ApplyScopes(scopes map[string]string) {
 	if s.Implicit != nil {
 		s.Implicit.Scopes = scopes
 	}

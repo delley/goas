@@ -40,6 +40,10 @@ type parser struct {
 
 	OpenAPI openapi.OpenAPIObject
 
+	schemaRegistry *schemaRegistry
+	astCache       *astPackageCache
+	importRegistry *importRegistry
+
 	CorePkgs      map[string]bool
 	KnownPkgs     []pkg
 	KnownNamePkg  map[string]*pkg
@@ -89,6 +93,12 @@ func newParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string,
 		ShowHidden:              showHidden,
 		FileRefPath:             descriptionRefPath,
 	}
+	p.astCache = newASTPackageCache()
+	p.importRegistry = newImportRegistry()
+	p.schemaRegistry = newSchemaRegistry(omitPackages)
+	p.KnownIDSchema = p.schemaRegistry.knownIDSchema
+	p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+	p.PkgNameImportedPkgAlias = p.importRegistry.pkgNameImportedPkgAlias
 	p.OpenAPI.OpenAPI = openapi.OpenAPIVersion
 	p.OpenAPI.Paths = make(openapi.PathsObject)
 	p.OpenAPI.Security = []map[string][]string{}
@@ -262,22 +272,118 @@ func (p *parser) parse() error {
 }
 
 func (p *parser) validateSchemaNames() error {
-	potentialConflictsMap := map[string][]string{}
-	for pkgName, schemaNames := range p.ApiSchemaNames {
-		for typeName, schemaName := range schemaNames {
-			potentialConflictsMap[schemaName] = append(potentialConflictsMap[schemaName], pkgName+"#"+typeName)
-		}
+	if p.schemaRegistry == nil {
+		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
 	}
-	conflicts := []string{}
-	for schemaName := range potentialConflictsMap {
-		if len(potentialConflictsMap[schemaName]) > 1 {
-			conflicts = append(conflicts, schemaName+": "+strings.Join(potentialConflictsMap[schemaName], " | "))
-		}
-	}
+	return p.schemaRegistry.validateSchemaNames()
+}
 
-	if len(conflicts) > 0 {
-		return fmt.Errorf("conflicting schema names - %s", strings.Join(conflicts, ", "))
+func (p *parser) parseGlobalServiceComments(attribute, value string, oauthScopes map[string]map[string]string) error {
+	switch attribute {
+	case "@version":
+		p.OpenAPI.Info.Version = value
+	case "@title":
+		p.OpenAPI.Info.Title = value
+	case "@description":
+		if p.OpenAPI.Info.Description == nil {
+			p.OpenAPI.Info.Description = &openapi.ReffableString{}
+		}
+		p.OpenAPI.Info.Description.Value = value
+	case "@termsofserviceurl":
+		p.OpenAPI.Info.TermsOfService = value
+	case "@contactname":
+		if p.OpenAPI.Info.Contact == nil {
+			p.OpenAPI.Info.Contact = &openapi.ContactObject{}
+		}
+		p.OpenAPI.Info.Contact.Name = value
+	case "@contactemail":
+		if p.OpenAPI.Info.Contact == nil {
+			p.OpenAPI.Info.Contact = &openapi.ContactObject{}
+		}
+		p.OpenAPI.Info.Contact.Email = value
+	case "@contacturl":
+		if p.OpenAPI.Info.Contact == nil {
+			p.OpenAPI.Info.Contact = &openapi.ContactObject{}
+		}
+		p.OpenAPI.Info.Contact.URL = value
+	case "@licensename":
+		if p.OpenAPI.Info.License == nil {
+			p.OpenAPI.Info.License = &openapi.LicenseObject{}
+		}
+		p.OpenAPI.Info.License.Name = value
+	case "@licenseurl":
+		if p.OpenAPI.Info.License == nil {
+			p.OpenAPI.Info.License = &openapi.LicenseObject{}
+		}
+		p.OpenAPI.Info.License.URL = value
+	case "@server":
+		spec, err := annotate.ParseServerComment(value)
+		if err != nil {
+			return err
+		}
+		if spec.URL == "" {
+			return nil
+		}
+		s := openapi.ServerObject{URL: spec.URL, Description: spec.Description}
+		p.OpenAPI.Servers = append(p.OpenAPI.Servers, s)
+	case "@security":
+		spec, err := annotate.ParseSecurityComment(value)
+		if err != nil {
+			return err
+		}
+		if spec.Name == "" {
+			return nil
+		}
+		security := map[string][]string{spec.Name: spec.Scopes}
+		p.OpenAPI.Security = append(p.OpenAPI.Security, security)
+	case "@securityscheme":
+		return p.parseSecuritySchemeComment(value, oauthScopes)
+	case "@securityscope":
+		return p.parseSecurityScopeComment(value, oauthScopes)
+	case "@tags":
+		return p.parseTagsComment("@Tags " + value)
 	}
+	return nil
+}
+
+func (p *parser) parseSecuritySchemeComment(value string, oauthScopes map[string]map[string]string) error {
+	spec, err := annotate.ParseSecuritySchemeComment(value)
+	if err != nil {
+		return err
+	}
+	if spec.Name == "" {
+		return nil
+	}
+	p.OpenAPI.Components.SecuritySchemes[spec.Name] = spec.ToOpenAPISecurityScheme()
+	return nil
+}
+
+func (p *parser) parseSecurityScopeComment(value string, oauthScopes map[string]map[string]string) error {
+	spec, err := annotate.ParseSecurityScopeComment(value)
+	if err != nil {
+		return err
+	}
+	if spec.SchemeName == "" {
+		return nil
+	}
+	if _, ok := oauthScopes[spec.SchemeName]; !ok {
+		oauthScopes[spec.SchemeName] = make(map[string]string)
+	}
+	if spec.ScopeName == "" {
+		return nil
+	}
+	oauthScopes[spec.SchemeName][spec.ScopeName] = spec.Description
+	return nil
+}
+
+func (p *parser) parseTagsComment(comment string) error {
+	t, err := annotate.ParseTags(comment)
+	if err != nil {
+		return err
+	}
+	p.OpenAPI.Tags = append(p.OpenAPI.Tags, *t)
 	return nil
 }
 
@@ -289,137 +395,26 @@ func (p *parser) parseEntryPoint() error {
 
 	// Security Scopes are defined at a different level in the hierarchy as where they need to end up in the OpenAPI structure,
 	// so a temporary list is needed.
-	oauthScopes := make(map[string]map[string]string, 0)
+	oauthScopes := make(map[string]map[string]string)
 
 	if fileTree.Comments != nil {
 		for i := range fileTree.Comments {
 			for _, comment := range strings.Split(fileTree.Comments[i].Text(), "\n") {
-				attribute := strings.ToLower(strings.Split(comment, " ")[0])
-				if len(attribute) == 0 || attribute[0] != '@' {
+				comment = strings.TrimSpace(comment)
+				if len(comment) == 0 {
 					continue
 				}
-				value := strings.TrimSpace(comment[len(attribute):])
+				fields := strings.Fields(comment)
+				if len(fields) == 0 || fields[0][0] != '@' {
+					continue
+				}
+				attribute := strings.ToLower(fields[0])
+				value := strings.TrimSpace(comment[len(fields[0]):])
 				if len(value) == 0 {
 					continue
 				}
-				// p.debug(attribute, value)
-				switch attribute {
-				case "@version":
-					p.OpenAPI.Info.Version = value
-				case "@title":
-					p.OpenAPI.Info.Title = value
-				case "@description":
-					if p.OpenAPI.Info.Description == nil {
-						p.OpenAPI.Info.Description = &openapi.ReffableString{}
-					}
-					p.OpenAPI.Info.Description.Value = value
-				case "@termsofserviceurl":
-					p.OpenAPI.Info.TermsOfService = value
-				case "@contactname":
-					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
-					}
-					p.OpenAPI.Info.Contact.Name = value
-				case "@contactemail":
-					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
-					}
-					p.OpenAPI.Info.Contact.Email = value
-				case "@contacturl":
-					if p.OpenAPI.Info.Contact == nil {
-						p.OpenAPI.Info.Contact = &openapi.ContactObject{}
-					}
-					p.OpenAPI.Info.Contact.URL = value
-				case "@licensename":
-					if p.OpenAPI.Info.License == nil {
-						p.OpenAPI.Info.License = &openapi.LicenseObject{}
-					}
-					p.OpenAPI.Info.License.Name = value
-				case "@licenseurl":
-					if p.OpenAPI.Info.License == nil {
-						p.OpenAPI.Info.License = &openapi.LicenseObject{}
-					}
-					p.OpenAPI.Info.License.URL = value
-				case "@server":
-					fields := strings.Split(value, " ")
-					s := openapi.ServerObject{URL: fields[0], Description: value[len(fields[0]):]}
-					p.OpenAPI.Servers = append(p.OpenAPI.Servers, s)
-				case "@security":
-					fields := strings.Split(value, " ")
-					security := map[string][]string{
-						fields[0]: fields[1:],
-					}
-					p.OpenAPI.Security = append(p.OpenAPI.Security, security)
-				case "@securityscheme":
-					fields := strings.Split(value, " ")
-
-					var scheme *openapi.SecuritySchemeObject
-					if strings.Contains(fields[1], "oauth2") {
-						if oauthScheme, ok := p.OpenAPI.Components.SecuritySchemes[fields[0]]; ok {
-							scheme = oauthScheme
-						} else {
-							scheme = &openapi.SecuritySchemeObject{
-								Type:       "oauth2",
-								OAuthFlows: &openapi.SecuritySchemeOauthObject{},
-							}
-						}
-					}
-
-					if scheme == nil {
-						scheme = &openapi.SecuritySchemeObject{
-							Type: fields[1],
-						}
-					}
-					switch fields[1] {
-					case "http":
-						scheme.Scheme = fields[2]
-						scheme.Description = strings.Join(fields[3:], " ")
-					case "apiKey":
-						scheme.In = fields[2]
-						scheme.Name = fields[3]
-						scheme.Description = strings.Join(fields[4:], "")
-					case "openIdConnect":
-						scheme.OpenIdConnectUrl = fields[2]
-						scheme.Description = strings.Join(fields[3:], " ")
-					case "oauth2AuthCode":
-						scheme.OAuthFlows.AuthorizationCode = &openapi.SecuritySchemeOauthFlowObject{
-							AuthorizationUrl: fields[2],
-							TokenUrl:         fields[3],
-							Scopes:           make(map[string]string, 0),
-						}
-					case "oauth2Implicit":
-						scheme.OAuthFlows.Implicit = &openapi.SecuritySchemeOauthFlowObject{
-							AuthorizationUrl: fields[2],
-							Scopes:           make(map[string]string, 0),
-						}
-					case "oauth2ResourceOwnerCredentials":
-						scheme.OAuthFlows.ResourceOwnerPassword = &openapi.SecuritySchemeOauthFlowObject{
-							TokenUrl: fields[2],
-							Scopes:   make(map[string]string, 0),
-						}
-					case "oauth2ClientCredentials":
-						scheme.OAuthFlows.ClientCredentials = &openapi.SecuritySchemeOauthFlowObject{
-							TokenUrl: fields[2],
-							Scopes:   make(map[string]string, 0),
-						}
-					}
-					p.OpenAPI.Components.SecuritySchemes[fields[0]] = scheme
-				case "@securityscope":
-					fields := strings.Split(value, " ")
-
-					if _, ok := oauthScopes[fields[0]]; !ok {
-						oauthScopes[fields[0]] = make(map[string]string, 0)
-					}
-
-					oauthScopes[fields[0]][fields[1]] = strings.Join(fields[2:], " ")
-				case "@tags":
-					t, err := annotate.ParseTags(comment)
-
-					if err != nil {
-						return err
-					}
-
-					p.OpenAPI.Tags = append(p.OpenAPI.Tags, *t)
+				if err := p.parseGlobalServiceComments(attribute, value, oauthScopes); err != nil {
+					return err
 				}
 			}
 		}
@@ -553,14 +548,13 @@ func (p *parser) parseGoRoot() error {
 }
 
 func (p *parser) getPkgAst(pkgPath string) (map[string]*ast.Package, error) {
+	if p.astCache == nil {
+		p.astCache = newASTPackageCache()
+	}
 	if cache, ok := p.PkgPathAstPkgCache[pkgPath]; ok {
 		return cache, nil
 	}
-	ignoreFileFilter := func(info os.FileInfo) bool {
-		name := info.Name()
-		return !info.IsDir() && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
-	}
-	astPackages, err := goparser.ParseDir(token.NewFileSet(), pkgPath, ignoreFileFilter, goparser.ParseComments)
+	astPackages, err := p.astCache.getPkgAst(pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -583,6 +577,10 @@ func (p *parser) parseAPIs() error {
 }
 
 func (p *parser) parseImportStatements() error {
+	if p.importRegistry == nil {
+		p.importRegistry = newImportRegistry()
+		p.PkgNameImportedPkgAlias = p.importRegistry.pkgNameImportedPkgAlias
+	}
 	for i := range p.KnownPkgs {
 		pkgPath := p.KnownPkgs[i].Path
 		pkgName := p.KnownPkgs[i].Name
@@ -593,7 +591,6 @@ func (p *parser) parseImportStatements() error {
 			continue
 		}
 
-		p.PkgNameImportedPkgAlias[pkgName] = map[string][]string{}
 		for _, astPackageKey := range load.SortedKeys(astPkgs) {
 			astPackage := astPkgs[astPackageKey]
 			for _, astFileKey := range load.SortedKeys(astPackage.Files) {
@@ -601,30 +598,12 @@ func (p *parser) parseImportStatements() error {
 				for _, astImport := range astFile.Imports {
 					importedPkgName := strings.Trim(astImport.Path.Value, "\"")
 					importedPkgAlias := ""
-
-					// _, known := p.KnownNamePkg[importedPkgName]
-					// if !known {
-					// 	p.debug("unknown", importedPkgName)
-					// }
-
-					if astImport.Name != nil && astImport.Name.Name != "." && astImport.Name.Name != "_" {
-						importedPkgAlias = astImport.Name.String()
-						// p.debug(importedPkgAlias, importedPkgName)
+					if astImport.Name != nil {
+						importedPkgAlias = p.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, &importName{Name: astImport.Name.Name})
 					} else {
-						s := strings.Split(importedPkgName, "/")
-						importedPkgAlias = s[len(s)-1]
+						importedPkgAlias = p.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, nil)
 					}
-
-					exist := false
-					for _, v := range p.PkgNameImportedPkgAlias[pkgName][importedPkgAlias] {
-						if v == importedPkgName {
-							exist = true
-							break
-						}
-					}
-					if !exist {
-						p.PkgNameImportedPkgAlias[pkgName][importedPkgAlias] = append(p.PkgNameImportedPkgAlias[pkgName][importedPkgAlias], importedPkgName)
-					}
+					p.importRegistry.recordImport(pkgName, importedPkgName, importedPkgAlias)
 				}
 			}
 		}
@@ -703,15 +682,12 @@ func (p *parser) parseTypeSpecs() error {
 }
 
 func (p *parser) parseTypeAnnotations(pkgName string, typeName string, commentGroup *ast.CommentGroup) error {
-	alias, ok, err := annotate.ParseApiSchemaName(commentGroup)
-	if err != nil || !ok {
-		return err
+	if p.schemaRegistry == nil {
+		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
 	}
-	if p.ApiSchemaNames[pkgName] == nil {
-		p.ApiSchemaNames[pkgName] = map[string]string{}
-	}
-	p.ApiSchemaNames[pkgName][typeName] = alias
-	return nil
+	return p.schemaRegistry.parseTypeAnnotations(pkgName, typeName, commentGroup)
 }
 
 func (p *parser) parsePaths() error {
@@ -1230,7 +1206,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 				}
 			}
 			if !exist {
-				log.Fatalf("Can not find definition of %s ast.TypeSpec. Current package %s", typeName, pkgName)
+				return nil, fmt.Errorf("can not find definition of %s ast.TypeSpec in current package %s", typeName, pkgName)
 			}
 		}
 		schemaObject.PkgName = pkgName
@@ -1277,8 +1253,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 					return &schemaObject, nil
 				}
 
-				log.Fatalf("Cannot find definition of guess %s ast.TypeSpec in package %s. "+
-					"If definition is in a vendor dependency, try running `go mod tidy && go mod vendor`",
+				return nil, fmt.Errorf("cannot find definition of guessed %s ast.TypeSpec in package %s; if the definition is in a vendor dependency, try running `go mod tidy && go mod vendor`",
 					guessTypeName, guessPkgName)
 			}
 			schemaObject.PkgName = guessPkgName
@@ -1353,6 +1328,16 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		packageIdentifier, ok := selectorType.X.(*ast.Ident)
 		usedTypeName := selectorType.Sel.Name
 		if ok {
+			if packageIdentifier.Name == "bson" {
+				switch usedTypeName {
+				case "ObjectId":
+					schemaObject.Type = &stringType
+				case "M":
+					schemaObject.Type = &objectType
+					schemaObject.AdditionalProperties = &openapi.SchemaObject{}
+				}
+			}
+
 			packageName := packageIdentifier.Name
 			for potentialPackage, typeSpecs := range p.TypeSpecs {
 				if strings.HasSuffix(potentialPackage, packageName) {
@@ -1381,23 +1366,16 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 
 	// we don't want to register 3rd party library types
 	if register {
-		// register schema object in spec tree if it doesn't exist
-		registerTypeName := schemaObject.ID
-		_, ok := p.OpenAPI.Components.Schemas[replaceBackslash(registerTypeName)]
-		if !ok {
-			p.OpenAPI.Components.Schemas[replaceBackslash(registerTypeName)] = &schemaObject
-			// also track in our map of pkg -> type -> schemaId
-			if _, ok = p.ApiSchemaNames[pkgName]; !ok {
-				p.ApiSchemaNames[pkgName] = map[string]string{}
-			}
-			typeNameWithoutPackage := typeNameParts[len(typeNameParts)-1]
-			if schemaName, ok := p.ApiSchemaNames[pkgName][typeNameWithoutPackage]; ok {
-				if schemaName != schemaObject.ID {
-					return nil, fmt.Errorf("different schema object id for type %s#%s: %s vs %s", pkgName, typeNameWithoutPackage, schemaObject.ID, schemaName)
-				}
-			} else {
-				p.ApiSchemaNames[pkgName][typeNameWithoutPackage] = schemaObject.ID
-			}
+		if p.schemaRegistry == nil {
+			p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
+			p.KnownIDSchema = p.schemaRegistry.knownIDSchema
+			p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+		}
+		if err := p.schemaRegistry.registerSchemaObject(pkgName, typeName, &schemaObject); err != nil {
+			return nil, err
+		}
+		if _, ok := p.OpenAPI.Components.Schemas[replaceBackslash(schemaObject.ID)]; !ok {
+			p.OpenAPI.Components.Schemas[replaceBackslash(schemaObject.ID)] = &schemaObject
 		}
 	}
 
@@ -1576,9 +1554,22 @@ func parseOverrideStructTag(astField *ast.Field) (renderedStructName string) {
 	return renderedStructName
 }
 
+func normalizeStructTagLiteral(tagLiteral string) string {
+	tagLiteral = strings.TrimSpace(tagLiteral)
+	if len(tagLiteral) >= 2 {
+		if tagLiteral[0] == '`' && tagLiteral[len(tagLiteral)-1] == '`' {
+			return tagLiteral[1 : len(tagLiteral)-1]
+		}
+		if tagLiteral[0] == '\'' && tagLiteral[len(tagLiteral)-1] == '\'' {
+			return tagLiteral[1 : len(tagLiteral)-1]
+		}
+	}
+	return tagLiteral
+}
+
 func parseStructTags(astField *ast.Field, structSchema *openapi.SchemaObject, fieldSchema *openapi.SchemaObject, name string) (newName string, skip bool) {
 	if astField.Tag != nil {
-		astFieldTag := reflect.StructTag(strings.Trim(astField.Tag.Value, "`"))
+		astFieldTag := reflect.StructTag(normalizeStructTagLiteral(astField.Tag.Value))
 		tagText := ""
 
 		if tag := astFieldTag.Get("goas"); tag != "" {
@@ -1685,19 +1676,12 @@ func (p *parser) debugf(format string, args ...interface{}) {
 }
 
 func (p *parser) genSchemaObjectID(pkgName, typeName string) string {
-	apiSchemaName, ok := p.ApiSchemaNames[pkgName][typeName]
-	if ok {
-		return apiSchemaName
+	if p.schemaRegistry == nil {
+		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
 	}
-
-	typeNameParts := strings.Split(typeName, ".")
-	pkgName = replaceBackslash(pkgName)
-	pkgNameParts := strings.Split(pkgName, "/")
-	if p.OmitPackages || pkgNameParts[len(pkgNameParts)-1] == "" {
-		return typeNameParts[len(typeNameParts)-1]
-	} else {
-		return strings.Join(append([]string{pkgNameParts[len(pkgNameParts)-1]}, typeNameParts[len(typeNameParts)-1]), ".")
-	}
+	return p.schemaRegistry.genSchemaObjectID(pkgName, typeName)
 }
 
 func setNestedFieldSchemaProps(valuePrefix, typeAsString string, fieldSchema, structSchema *openapi.SchemaObject) {

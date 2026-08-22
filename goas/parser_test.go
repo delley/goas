@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"os"
+	"os/exec"
 	"regexp"
 	"testing"
 
@@ -16,6 +17,26 @@ import (
 func setupParser() (*parser, error) {
 	return newParser("../example/", "../example/main.go", "", "", false, true, false)
 }
+func Test_parseSchemaObject_missingTypeReturnsError(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		p, err := setupParser()
+		if err != nil {
+			t.Fatalf("setupParser() error = %v", err)
+		}
+		_, err = p.parseSchemaObject("../example", "main", "DefinitelyMissingType", true)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_parseSchemaObject_missingTypeReturnsError")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "missing type should return an error instead of terminating the process: %s", string(out))
+	require.NotContains(t, string(out), "Can not find definition")
+}
+
 func TestExample(t *testing.T) {
 	p, err := setupParser()
 	require.NoError(t, err)
@@ -61,6 +82,19 @@ func TestDeterministic(t *testing.T) {
 	for i := 0; i < len(allOutputs)-1; i++ {
 		require.Equal(t, allOutputs[i], allOutputs[i+1])
 	}
+}
+
+func Test_parseStructTags_handlesSingleQuotedTagLiteral(t *testing.T) {
+	field := &ast.Field{
+		Names: []*ast.Ident{{Name: "Example"}},
+		Tag: &ast.BasicLit{Value: "'json:\"doubleAlias\"'"},
+	}
+	structSchema := &openapi.SchemaObject{DisabledFieldNames: map[string]struct{}{}}
+	fieldSchema := &openapi.SchemaObject{}
+
+	newName, skip := parseStructTags(field, structSchema, fieldSchema, "Example")
+	require.False(t, skip)
+	require.Equal(t, "doubleAlias", newName)
 }
 
 func Test_parseRouteComment(t *testing.T) {
@@ -173,6 +207,12 @@ func Test_handleCompoundType(t *testing.T) {
 	})
 }
 
+func Test_addSchemaRefLinkPrefix_emptyNameIsSafe(t *testing.T) {
+	require.Equal(t, "", addSchemaRefLinkPrefix(""))
+	require.Equal(t, "#/components/schemas/User", addSchemaRefLinkPrefix("User"))
+	require.Equal(t, "#/components/schemas/User", addSchemaRefLinkPrefix("#/components/schemas/User"))
+}
+
 func Test_descriptions(t *testing.T) {
 	t.Run("Description unchanged when not a ref", func(t *testing.T) {
 		p, err := setupParser()
@@ -243,6 +283,57 @@ func Test_genSchemaObjectID(t *testing.T) {
 	})
 }
 
+func Test_parseEntryPointHelpers(t *testing.T) {
+	t.Run("Parses security scheme, scopes and tags", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		require.NoError(t, p.parseSecuritySchemeComment("oauth2 oauth2AuthCode https://example.com/auth https://example.com/token", oauthScopes))
+		require.NoError(t, p.parseSecurityScopeComment("oauth2 read Read access", oauthScopes))
+		require.NoError(t, p.parseTagsComment("@Tags \"Foo\" \"Bar\""))
+
+		require.Contains(t, p.OpenAPI.Components.SecuritySchemes, "oauth2")
+		require.NotNil(t, p.OpenAPI.Components.SecuritySchemes["oauth2"].OAuthFlows)
+		require.NotNil(t, p.OpenAPI.Components.SecuritySchemes["oauth2"].OAuthFlows.AuthorizationCode)
+		require.Equal(t, "Read access", oauthScopes["oauth2"]["read"])
+		require.Equal(t, "Foo", p.OpenAPI.Tags[0].Name)
+	})
+
+	t.Run("Keeps free-form descriptions with spaces for apiKey schemes", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		require.NoError(t, p.parseSecuritySchemeComment("MyApiAuth apiKey header X-MyCustomHeader Login com seu token", oauthScopes))
+
+		scheme, ok := p.OpenAPI.Components.SecuritySchemes["MyApiAuth"]
+		require.True(t, ok)
+		require.Equal(t, "header", scheme.In)
+		require.Equal(t, "X-MyCustomHeader", scheme.Name)
+		require.Equal(t, "Login com seu token", scheme.Description)
+	})
+}
+
+func Test_parseSchemaObject_externalAliases(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+	require.NoError(t, p.parse())
+
+	t.Run("BsonID is generated as string", func(t *testing.T) {
+		schema, err := p.parseSchemaObject("../example", "main", "BsonID", true)
+		require.NoError(t, err)
+		require.Equal(t, "string", *schema.Type)
+	})
+
+	t.Run("Instruction is generated as free-form object", func(t *testing.T) {
+		schema, err := p.parseSchemaObject("../example", "main", "Instruction", true)
+		require.NoError(t, err)
+		require.Equal(t, "object", *schema.Type)
+		require.NotNil(t, schema.AdditionalProperties)
+	})
+}
+
 func Test_parseOperationTags(t *testing.T) {
 	t.Run("Parses operation tags", func(t *testing.T) {
 		p, err := setupParser()
@@ -291,6 +382,40 @@ func Test_validateSchemaNames(t *testing.T) {
 
 		require.Error(t, err)
 	})
+
+	t.Run("Schema registry validates aliases independently", func(t *testing.T) {
+		reg := newSchemaRegistry(false)
+		reg.apiSchemaNames["pkg/foo/bar"] = map[string]string{}
+		reg.apiSchemaNames["pkg/foo/bar"]["BarRecord"] = "Record"
+		reg.apiSchemaNames["pkg/baz/qux"] = map[string]string{}
+		reg.apiSchemaNames["pkg/baz/qux"]["QuxRecord"] = "Record"
+
+		require.Error(t, reg.validateSchemaNames())
+	})
+}
+
+func Test_astPackageCache(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+
+	cache := newASTPackageCache()
+	moduleAST, err := cache.getPkgAst(p.ModulePath)
+	require.NoError(t, err)
+	require.NotEmpty(t, moduleAST)
+
+	cachedAgain, err := cache.getPkgAst(p.ModulePath)
+	require.NoError(t, err)
+	require.Equal(t, len(moduleAST), len(cachedAgain))
+}
+
+func Test_importRegistryTracksAliases(t *testing.T) {
+	reg := newImportRegistry()
+	reg.recordImport("example.com/foo", "github.com/example/pkg", "pkg")
+	reg.recordImport("example.com/foo", "github.com/example/pkg", "pkg")
+	reg.recordImport("example.com/foo", "github.com/example/other", "other")
+
+	require.Len(t, reg.pkgNameImportedPkgAlias["example.com/foo"]["pkg"], 1)
+	require.Len(t, reg.pkgNameImportedPkgAlias["example.com/foo"]["other"], 1)
 }
 
 func Test_parseOverrideStructTag(t *testing.T) {

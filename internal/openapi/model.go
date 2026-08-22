@@ -18,7 +18,7 @@ type OpenAPIObject struct {
 	Servers []ServerObject `json:"servers,omitempty"`
 	Paths   PathsObject    `json:"paths"` // Required
 
-	Components ComponentsOjbect      `json:"components,omitempty"` // Required for Authorization header
+	Components ComponentsObject      `json:"components,omitempty"` // Required for Authorization header
 	Security   []map[string][]string `json:"security,omitempty"`
 
 	Tags []TagDefinition `json:"tags,omitempty"`
@@ -213,7 +213,7 @@ type HeaderObject struct {
 	Ref string `json:"$ref,omitempty"`
 }
 
-type ComponentsOjbect struct {
+type ComponentsObject struct {
 	Schemas         map[string]*SchemaObject         `json:"schemas,omitempty"`
 	SecuritySchemes map[string]*SecuritySchemeObject `json:"securitySchemes,omitempty"`
 
@@ -239,24 +239,24 @@ type SecuritySchemeObject struct {
 	Name string `json:"name,omitempty"`
 
 	// OpenID
-	OpenIdConnectUrl string `json:"openIdConnectUrl,omitempty"`
+	OpenIDConnectURL string `json:"openIdConnectUrl,omitempty"`
 
 	// OAuth2
-	OAuthFlows *SecuritySchemeOauthObject `json:"flows,omitempty"`
+	OAuthFlows *SecuritySchemeOAuthObject `json:"flows,omitempty"`
 
 	// BearerFormat
 }
 
-type SecuritySchemeOauthObject struct {
-	Implicit              *SecuritySchemeOauthFlowObject `json:"implicit,omitempty"`
-	AuthorizationCode     *SecuritySchemeOauthFlowObject `json:"authorizationCode,omitempty"`
-	ResourceOwnerPassword *SecuritySchemeOauthFlowObject `json:"password,omitempty"`
-	ClientCredentials     *SecuritySchemeOauthFlowObject `json:"clientCredentials,omitempty"`
+type SecuritySchemeOAuthObject struct {
+	Implicit              *SecuritySchemeOAuthFlowObject `json:"implicit,omitempty"`
+	AuthorizationCode     *SecuritySchemeOAuthFlowObject `json:"authorizationCode,omitempty"`
+	ResourceOwnerPassword *SecuritySchemeOAuthFlowObject `json:"password,omitempty"`
+	ClientCredentials     *SecuritySchemeOAuthFlowObject `json:"clientCredentials,omitempty"`
 }
 
-type SecuritySchemeOauthFlowObject struct {
-	AuthorizationUrl string            `json:"authorizationUrl,omitempty"`
-	TokenUrl         string            `json:"tokenUrl,omitempty"`
+type SecuritySchemeOAuthFlowObject struct {
+	AuthorizationURL string            `json:"authorizationUrl,omitempty"`
+	TokenURL         string            `json:"tokenUrl,omitempty"`
 	Scopes           map[string]string `json:"scopes"`
 }
 
