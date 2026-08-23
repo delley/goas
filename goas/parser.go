@@ -1202,7 +1202,9 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		typeAsString := internalTypes.TypeAsString(typeSpec.Type)
 		localGoType := internalTypes.GetOASType(typeAsString)
 		schemaObject.Type = &localGoType
-		checkFormatInt64(typeAsString, &schemaObject)
+		if internalTypes.GetOASFormat(typeAsString) == "int64" {
+			schemaObject.Format = "int64"
+		}
 
 	} else if astIdent, ok := typeSpec.Type.(*ast.Ident); ok {
 		// this is for type aliases to custom types
@@ -1378,7 +1380,9 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *openapi.Sc
 	} else if internalTypes.IsGoTypeOASType(typeAsString) {
 		localGoType := internalTypes.GetOASType(typeAsString)
 		fieldSchema.Type = &localGoType
-		checkFormatInt64(typeAsString, fieldSchema)
+		if internalTypes.GetOASFormat(typeAsString) == "int64" {
+			fieldSchema.Format = "int64"
+		}
 	}
 	// for embedded fields
 	if len(astField.Names) == 0 {
