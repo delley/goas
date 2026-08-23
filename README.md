@@ -14,9 +14,26 @@ The public contract is intentionally small: the root package exposes the generat
 
 The supported public surface is the `Generator` API (`New()`, `Generate()`, and `GenerateTo()`) plus the `Options` configuration type. `NewParser` remains exported only for source compatibility with older integrations and is now deprecated: it is a legacy compatibility entry point and should not be used in new code. The underlying parser value is intentionally opaque because it is an internal implementation detail rather than a supported public type.
 
-## Limit
-- Only support go module.
-- Anonymous struct field is not supported.
+## Support and limitations
+
+- Go modules are required. The module root must contain `go.mod`.
+- Service-level annotations are read only from the selected entrypoint. When
+  `--main-file-path` is empty, goas discovers a Go file in the module root
+  whose package is `main`.
+- Anonymous struct fields are supported when they embed another struct. Their
+  properties are flattened into the containing schema; an existing property
+  with the same name takes precedence.
+- Built-in scalar types, structs, pointers, slices, maps, and interfaces are
+  supported. Map keys are represented by OpenAPI object properties, so map
+  values are the type that is documented.
+- `time.Time`, `uuid.UUID`, and selected BSON types have special handling.
+  Other external types depend on source being available through the Go
+  toolchain and may only produce a partial schema.
+- For responses, `object` keeps the resolved schema and `array` wraps it in an
+  array when the schema is not already an array. Omitting the response type
+  creates a response without a content schema, which is useful for `204`.
+- `@ApiSchemaName` changes the component name. With `--omit-packages`, a
+  conflict between types with the same name is an error.
 
 ## Install
 
@@ -68,7 +85,7 @@ A number of different types is supported, they all have different parameters:
 |OAuth2ResourceOwnerCredentials|Using the "Resource Owner Credentials" flow of OAuth2|tokenUrl|`@SecurityScheme MyApiAuth oauth2ResourceOwnerCredentials /oauth/token`|
 |OAuth2ClientCredentials|Using the "Client Credentials" flow of OAuth2|tokenUrl|`@SecurityScheme MyApiAuth oauth2ClientCredentials /oauth/token`|
 
-Any text that is present after the last parameter wil be used as the description. For instance `@SecurityScheme MyApiAuth basic Login with your admin credentials`.
+Any text that is present after the last parameter will be used as the description. For instance `@SecurityScheme MyApiAuth http basic Login with your admin credentials`.
 
 Once all security schemes have been defined, they must be configured. This is done with the `@Security` comment.
 Depending on the `type` of the scheme, scopes (see below) may be supported. *At the moment, it is only possible to configure security for the entire service*.
@@ -170,7 +187,9 @@ func PostUser() {
 @Failure  400       object      ErrorResponse  "ErrorResponse JSON"
 ```
 - {status}: The HTTP status code.
-- {jsonType}: The value can be `object` or `array`. 
+- {jsonType}: Optional. Use `object` or `array`; `array` produces an array
+  schema around {goType} when needed. Omit it for a response without a
+  content schema, such as `204`.
 - {goType}: The type in go code.
 - {description}: The description of the response. Must be quoted.
 
@@ -203,7 +222,7 @@ Paths passed to `--main-file-path`, `--handler-path` and `--file-ref-path` are r
 
 From the repository root, generate the included example to stdout:
 ```
-go run ./cmd/goas --module-path ./example --main-file-path ./main.go --output -
+go run ./cmd/goas --module-path ./example --main-file-path ./main.go --omit-packages --output -
 ```
 
 From a module whose `go.mod` and main file are in the same directory:
@@ -220,7 +239,7 @@ When running the example as a separate Go module, build the binary once at the r
 ```
 go build -o ./goas-cli ./cmd/goas
 cd example
-../goas-cli --module-path . --main-file-path ./main.go --output ./example.json
+../goas-cli --module-path . --main-file-path ./main.go --omit-packages --output ./example.json
 ```
 
 The `go run ../cmd/goas` form is not valid from inside the `example` module because the command package is outside the active module. The entrypoint file must be under the module root or be provided explicitly with `--main-file-path`; service-level comments in other Go files are not read as global comments.
@@ -242,7 +261,8 @@ The `go run ../cmd/goas` form is not valid from inside the `example` module beca
 
 ### Unit tests
 
-Run `go mod tidy` in the `example` directory.
+The example is a separate Go module. Run `go mod tidy` in the `example`
+directory when its dependencies need to be synchronized.
 
 Run `go test` in root directory to run unit tests.
 
@@ -257,13 +277,13 @@ go build -o ./goas-cli ./cmd/goas
 From the repository root, run it against the included `example` application:
 
 ```
-./goas-cli --module-path ./example --main-file-path ./main.go --output ./example/example.json
+./goas-cli --module-path ./example --main-file-path ./main.go --omit-packages --output /tmp/goas-example.json
 ```
 
 Alternatively, from the `example` directory run the binary from its parent:
 
 ```
-../goas-cli --module-path . --main-file-path ./main.go --output ./example.json
+../goas-cli --module-path . --main-file-path ./main.go --omit-packages --output ./example.json
 ```
 
 The module path is the base for relative `--main-file-path`, `--handler-path` and

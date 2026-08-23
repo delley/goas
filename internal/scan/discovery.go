@@ -36,8 +36,6 @@ func DiscoverPackages(ctx *load.ModuleContext) (*PackageSet, error) {
 			return nil
 		}
 		// Skip excluded directories: .git, vendor, node_modules, and similar metadata
-		relPath := strings.TrimPrefix(path, ctx.ModulePath)
-		relPath = strings.TrimPrefix(relPath, "/")
 		dir := filepath.Base(path)
 		if strings.HasPrefix(dir, ".") || dir == "vendor" || dir == "node_modules" {
 			return filepath.SkipDir

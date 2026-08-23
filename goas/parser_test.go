@@ -595,6 +595,21 @@ func Test_parseGoMod(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("Returns error when a dependency directory cannot be walked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		goModPath := filepath.Join(tmpDir, "go.mod")
+		require.NoError(t, os.WriteFile(goModPath, []byte("module example.com/test\n\nrequire example.com/missing v1.0.0\n"), 0644))
+
+		p, err := setupParser()
+		require.NoError(t, err)
+		p.GoModFilePath = goModPath
+		p.GoModCachePath = filepath.Join(tmpDir, "gomodcache")
+
+		err = p.parseGoMod()
+		require.Error(t, err)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
 	t.Run("Handles uppercase characters in module paths", func(t *testing.T) {
 		p, err := setupParser()
 		require.NoError(t, err)

@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// BasicGoTypes maps Go built-in type names to a marker value.
-var BasicGoTypes = map[string]bool{
+var basicGoTypes = map[string]bool{
 	"bool":       true,
 	"uint":       true,
 	"uint8":      true,
@@ -32,13 +31,11 @@ var BasicGoTypes = map[string]bool{
 
 // IsBasicGoType reports whether typeName is a built-in Go type.
 func IsBasicGoType(typeName string) bool {
-	_, ok := BasicGoTypes[typeName]
+	_, ok := basicGoTypes[typeName]
 	return ok
 }
 
-// GoTypesOASTypes maps Go types to OpenAPI Schema types.
-// Only types that map to standard OAS types are included.
-var GoTypesOASTypes = map[string]string{
+var goTypesOASTypes = map[string]string{
 	"bool":    "boolean",
 	"uint":    "integer",
 	"uint8":   "integer",
@@ -57,12 +54,11 @@ var GoTypesOASTypes = map[string]string{
 
 // IsGoTypeOASType reports whether typeName is a Go type that maps to an OAS type.
 func IsGoTypeOASType(typeName string) bool {
-	_, ok := GoTypesOASTypes[typeName]
+	_, ok := goTypesOASTypes[typeName]
 	return ok
 }
 
-// GoTypesOASFormats maps Go types to OpenAPI Schema format strings.
-var GoTypesOASFormats = map[string]string{
+var goTypesOASFormats = map[string]string{
 	"bool":    "boolean",
 	"uint":    "int64",
 	"uint8":   "int64",
@@ -81,12 +77,12 @@ var GoTypesOASFormats = map[string]string{
 
 // GetOASType returns the OpenAPI type for a Go type, or empty string if not found.
 func GetOASType(goType string) string {
-	return GoTypesOASTypes[goType]
+	return goTypesOASTypes[goType]
 }
 
 // GetOASFormat returns the OpenAPI format for a Go type, or empty string if not found.
 func GetOASFormat(goType string) string {
-	return GoTypesOASFormats[goType]
+	return goTypesOASFormats[goType]
 }
 
 // TypeAsString converts an AST type expression to its string representation.

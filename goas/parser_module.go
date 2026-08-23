@@ -73,8 +73,8 @@ func (p *parser) parseGoMod() error {
 				return err
 			}
 			if info != nil && info.IsDir() {
-				if strings.HasPrefix(strings.Trim(strings.TrimPrefix(path, p.ModulePath), "/"), ".git") {
-					return nil
+				if filepath.Base(path) == ".git" {
+					return filepath.SkipDir
 				}
 				fns, err := filepath.Glob(filepath.Join(path, "*.go"))
 				if len(fns) == 0 || err != nil {
@@ -92,7 +92,9 @@ func (p *parser) parseGoMod() error {
 			}
 			return nil
 		}
-		filepath.Walk(pkgPath, walker)
+		if err := filepath.Walk(pkgPath, walker); err != nil {
+			return err
+		}
 	}
 	if p.Debug {
 		for i := range p.KnownPkgs {
