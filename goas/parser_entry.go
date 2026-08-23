@@ -15,7 +15,7 @@ func (p *parser) parseEntryPoint() error {
 	fset := token.NewFileSet()
 	fileTree, err := goparser.ParseFile(fset, p.MainFilePath, nil, goparser.ParseComments)
 	if err != nil {
-		return fmt.Errorf("can not parse general API information: %v", err)
+		return fmt.Errorf("can not parse general API information: %w", err)
 	}
 
 	// Security Scopes are defined at a different level in the hierarchy as where they need to end up in the OpenAPI structure,
