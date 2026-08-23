@@ -35,8 +35,12 @@ func DiscoverPackages(ctx *load.ModuleContext) (*PackageSet, error) {
 		if info == nil || !info.IsDir() {
 			return nil
 		}
-		if strings.HasPrefix(strings.Trim(strings.TrimPrefix(path, ctx.ModulePath), "/"), ".git") {
-			return nil
+		// Skip excluded directories: .git, vendor, node_modules, and similar metadata
+		relPath := strings.TrimPrefix(path, ctx.ModulePath)
+		relPath = strings.TrimPrefix(relPath, "/")
+		dir := filepath.Base(path)
+		if strings.HasPrefix(dir, ".") || dir == "vendor" || dir == "node_modules" {
+			return filepath.SkipDir
 		}
 		fns, err := filepath.Glob(filepath.Join(path, "*.go"))
 		if len(fns) == 0 || err != nil {
