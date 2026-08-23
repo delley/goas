@@ -9,15 +9,17 @@ import (
 )
 
 func Test_IsMainFile(t *testing.T) {
-	t.Run("package main with func main()", func(t *testing.T) {
+	t.Run("package main with formatted func main", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "main.go")
 
-		err := os.WriteFile(p, []byte(`package main
+		err := os.WriteFile(p, []byte(`// A comment before the package and unusual formatting must not matter.
+package   main
 
 import "fmt"
 
-func main() {
+func
+main( ) {
 	fmt.Println("ok")
 }
 `), 0o644)
@@ -43,6 +45,18 @@ func x() {}
 		require.False(t, ok)
 	})
 
+	t.Run("main function with arguments is not an entrypoint", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "notmain.go")
+
+		err := os.WriteFile(p, []byte("package main\nfunc main(value int) {}\n"), 0o644)
+		require.NoError(t, err)
+
+		ok, err := IsMainFile(p)
+		require.NoError(t, err)
+		require.False(t, ok)
+	})
+
 	t.Run("func main() but not package main", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "foo.go")
@@ -55,6 +69,18 @@ func main() {}
 
 		ok, err := IsMainFile(p)
 		require.NoError(t, err)
+		require.False(t, ok)
+	})
+
+	t.Run("invalid Go source", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "invalid.go")
+
+		err := os.WriteFile(p, []byte("package main\nfunc main( {\n"), 0o644)
+		require.NoError(t, err)
+
+		ok, err := IsMainFile(p)
+		require.Error(t, err)
 		require.False(t, ok)
 	})
 }

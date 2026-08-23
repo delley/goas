@@ -33,6 +33,25 @@ func TestResolveModuleContext_AutodetectsMainFile(t *testing.T) {
 	require.Equal(t, filepath.Join(dir, "server.go"), ctx.MainFilePath)
 }
 
+func TestResolveModuleContext_ErrorsWhenMainFileIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.23\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "library.go"), []byte("package library\n"), 0o644))
+
+	_, err := ResolveModuleContext(dir, "", "", "")
+	require.EqualError(t, err, "main file not found in "+dir)
+}
+
+func TestResolveModuleContext_ErrorsWhenAutodetectedGoFileIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.23\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package main\nfunc main( {\n"), 0o644))
+
+	_, err := ResolveModuleContext(dir, "", "", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot parse Go file")
+}
+
 func TestResolveModuleContext_ErrorsOnInvalidMainFile(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.23\n"), 0o644))

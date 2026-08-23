@@ -1,36 +1,24 @@
 package load
 
 import (
-	"bufio"
-	"os"
-	"strings"
+	"go/ast"
+	"go/parser"
+	"go/token"
 )
 
 func IsMainFile(path string) (bool, error) {
-	f, err := os.Open(path)
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
 
-	var isMainPackage, hasMainFunc bool
-
-	bs := bufio.NewScanner(f)
-	for bs.Scan() {
-		l := bs.Text()
-		if !isMainPackage && strings.HasPrefix(l, "package main") {
-			isMainPackage = true
-		}
-		if !hasMainFunc && strings.HasPrefix(l, "func main()") {
-			hasMainFunc = true
-		}
-		if isMainPackage && hasMainFunc {
-			break
+	if file.Name.Name != "main" {
+		return false, nil
+	}
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Name.Name == "main" && function.Type.Params.NumFields() == 0 && function.Type.Results == nil {
+			return true, nil
 		}
 	}
-	if err := bs.Err(); err != nil {
-		return false, err
-	}
-
-	return isMainPackage && hasMainFunc, nil
+	return false, nil
 }

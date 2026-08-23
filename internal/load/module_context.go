@@ -128,11 +128,14 @@ func ResolveMainFile(modulePath, mainFilePath string) (string, error) {
 		}
 		for _, fn := range fns {
 			isMain, err := IsMainFile(fn)
-			if err == nil && isMain {
+			if err != nil {
+				return "", fmt.Errorf("cannot parse Go file %s: %w", fn, err)
+			}
+			if isMain {
 				return fn, nil
 			}
 		}
-		return "", nil
+		return "", fmt.Errorf("main file not found in %s", modulePath)
 	}
 
 	mainFilePath, err := filepath.Abs(mainFilePath)
