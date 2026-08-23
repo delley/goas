@@ -6,7 +6,6 @@ import (
 	"github.com/delley/goas/internal/desc"
 	generatepkg "github.com/delley/goas/internal/generate"
 	"github.com/delley/goas/internal/openapi"
-	internalSchema "github.com/delley/goas/internal/schema"
 )
 
 // buildSpec is the generation orchestrator. It coordinates the internal
@@ -23,46 +22,24 @@ func buildSpec(ctx context.Context, opt Options) (*openapi.OpenAPIObject, error)
 		ShowHidden:   opt.ShowHidden,
 		Debug:        opt.Debug,
 	}
+	var parsed *parser
 
 	spec, err := pipeline.Run(input,
 		func(ctx context.Context, in generatepkg.Input) (*generatepkg.Document, error) {
-			p, err := newParserContext(ctx,
-				in.ModulePath,
-				in.MainFilePath,
-				in.HandlerPath,
-				in.FileRefPath,
-				in.Debug,
-				in.OmitPackages,
-				in.ShowHidden,
-			)
+			p, err := newParserForInput(ctx, in)
 			if err != nil {
 				return nil, err
 			}
 			if err := p.parse(); err != nil {
 				return nil, err
 			}
+			parsed = p
 			return &generatepkg.Document{Spec: &p.OpenAPI}, nil
 		},
 		generatepkg.Phase{
 			Name: "validate-schema-names",
 			Run: func(ctx context.Context, doc *generatepkg.Document) error {
-				p, err := newParserContext(ctx,
-					input.ModulePath,
-					input.MainFilePath,
-					input.HandlerPath,
-					input.FileRefPath,
-					input.Debug,
-					input.OmitPackages,
-					input.ShowHidden,
-				)
-				if err != nil {
-					return err
-				}
-				p.OpenAPI = *doc.Spec
-				p.schemaRegistry = internalSchema.NewRegistry(input.OmitPackages)
-				p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
-				p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
-				return p.validateSchemaNames()
+				return parsed.validateSchemaNames()
 			},
 		},
 		generatepkg.Phase{
@@ -76,4 +53,16 @@ func buildSpec(ctx context.Context, opt Options) (*openapi.OpenAPIObject, error)
 		return nil, err
 	}
 	return spec, nil
+}
+
+func newParserForInput(ctx context.Context, input generatepkg.Input) (*parser, error) {
+	return newParserContext(ctx,
+		input.ModulePath,
+		input.MainFilePath,
+		input.HandlerPath,
+		input.FileRefPath,
+		input.Debug,
+		input.OmitPackages,
+		input.ShowHidden,
+	)
 }
