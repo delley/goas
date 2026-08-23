@@ -2,6 +2,8 @@ package desc
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/delley/goas/internal/openapi"
@@ -15,6 +17,19 @@ func Test_fetchRef(t *testing.T) {
 
 		require.Equal(t, "Example description", desc)
 	})
+}
+
+func TestFetchRefContextReturnsErrorResponseBodyBaseline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusBadGateway)
+		_, err := writer.Write([]byte("upstream failure"))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	description, err := FetchRefContext(t.Context(), ".", "$ref:"+server.URL)
+	require.NoError(t, err)
+	require.Equal(t, "upstream failure", description)
 }
 
 func Test_infoDescriptionRef(t *testing.T) {

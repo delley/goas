@@ -61,6 +61,9 @@ type parser struct {
 	OmitPackages bool
 	ShowHidden   bool
 	FileRefPath  string
+
+	// Accumulated parsing errors; non-fatal issues that don't interrupt parsing
+	ParseErrors []error
 }
 
 type pkg = scan.Package
@@ -121,6 +124,7 @@ func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath
 	p.OpenAPI.Security = []map[string][]string{}
 	p.OpenAPI.Components.Schemas = make(map[string]*openapi.SchemaObject)
 	p.OpenAPI.Components.SecuritySchemes = map[string]*openapi.SecuritySchemeObject{}
+	p.ParseErrors = []error{}
 
 	moduleCtx, err := load.ResolveModuleContext(modulePath, mainFilePath, handlerPath, descriptionRefPath)
 	if err != nil {
@@ -464,6 +468,19 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *openapi.O
 	return nil
 }
 
+func basicTypeSchema(goType string) *openapi.SchemaObject {
+	if !internalTypes.IsGoTypeOASType(goType) {
+		return nil
+	}
+
+	typeName := internalTypes.GetOASType(goType)
+	schema := &openapi.SchemaObject{Type: &typeName}
+	if format := internalTypes.GetOASFormat(goType); format != "" {
+		schema.Format = format
+	}
+	return schema
+}
+
 func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*openapi.SchemaObject, error) {
 	if strings.HasPrefix(typeName, "[]") || strings.HasPrefix(typeName, "map[]") || typeName == "time.Time" {
 		schema, err := p.parseSchemaObject(pkgPath, pkgName, typeName, true)
@@ -484,9 +501,7 @@ func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*openapi.Sche
 		return nil, err
 	}
 	if internalTypes.IsBasicGoType(registeredTypeName) {
-		return &openapi.SchemaObject{
-			Type: &stringType,
-		}, nil
+		return basicTypeSchema(registeredTypeName), nil
 	} else {
 		return &openapi.SchemaObject{
 			Ref: openapi.SchemaRef(registeredTypeName),
@@ -522,7 +537,7 @@ func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *openap
 				return err
 			}
 			if internalTypes.IsBasicGoType(typeName) {
-				schema = &openapi.SchemaObject{Type: &stringType}
+				schema = basicTypeSchema(typeName)
 			} else {
 				schema = &openapi.SchemaObject{Ref: openapi.SchemaRef(typeName)}
 			}

@@ -245,6 +245,9 @@ type SecuritySchemeObject struct {
 	OAuthFlows *SecuritySchemeOAuthObject `json:"flows,omitempty"`
 
 	// BearerFormat
+
+	// Internal: Line number where this scheme was defined (for error reporting)
+	LineNumber int `json:"-"`
 }
 
 type SecuritySchemeOAuthObject struct {

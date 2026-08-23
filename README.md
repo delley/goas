@@ -71,7 +71,7 @@ If authorization is required, you must define security schemes and then apply th
 A scheme is defined using `@SecurityScheme [name] [type] [parameters]` and applied by adding `@Security [scheme-name] [scope1] [scope2] [...]`. 
 
 All examples in this section use `MyApiAuth` as the name. This name can be anything you chose; multiple named schemes are supported.
-Each scheme must have its own name, except for OAuth2 schemes - OAuth2 supports multiple schemes by the same name.
+**Each scheme must have its own unique name.** If you attempt to define a security scheme with a name that already exists, the parser will reject it with an error message indicating the line number where the first definition was found.
 
 A number of different types is supported, they all have different parameters:
 
@@ -87,6 +87,45 @@ A number of different types is supported, they all have different parameters:
 
 Any text that is present after the last parameter will be used as the description. For instance `@SecurityScheme MyApiAuth http basic Login with your admin credentials`.
 
+##### Security Scheme Rules
+
+**Unique Names**: Each security scheme name must be unique across your API. If you attempt to redefine a scheme with the same name, the parser will reject it with an error message indicating where the first definition was found. Example error:
+```
+security scheme 'MyOAuth2' already defined at line 5
+```
+
+##### OAuth2 Flow Examples
+
+The OAuth2 standard defines four authorization flows, each suited for different scenarios:
+
+**1. Authorization Code Flow** (most common for web applications):
+```go
+// @SecurityScheme OAuth2 oauth2AuthCode https://example.com/oauth/authorize https://example.com/oauth/token
+// @Security OAuth2 read write
+```
+This flow requires both an authorization URL (where users log in) and a token URL (where the app exchanges authorization for an access token).
+
+**2. Implicit Flow** (for browser-based applications):
+```go
+// @SecurityScheme OAuth2Implicit oauth2Implicit https://example.com/oauth/authorize
+// @Security OAuth2Implicit read
+```
+This flow requires only an authorization URL. The access token is returned directly from the authorization endpoint.
+
+**3. Resource Owner Password Credentials Flow** (for trusted applications):
+```go
+// @SecurityScheme OAuth2ResourceOwner oauth2ResourceOwnerCredentials https://example.com/oauth/token
+// @Security OAuth2ResourceOwner read write
+```
+This flow requires only a token URL. The app directly requests tokens using user credentials (not recommended for untrusted clients).
+
+**4. Client Credentials Flow** (for server-to-server communication):
+```go
+// @SecurityScheme OAuth2Client oauth2ClientCredentials https://example.com/oauth/token
+// @Security OAuth2Client admin
+```
+This flow requires only a token URL. The app authenticates directly using its own credentials, not a user's credentials.
+
 Once all security schemes have been defined, they must be configured. This is done with the `@Security` comment.
 Depending on the `type` of the scheme, scopes (see below) may be supported. *At the moment, it is only possible to configure security for the entire service*.
 
@@ -95,12 +134,28 @@ Depending on the `type` of the scheme, scopes (see below) may be supported. *At 
 ```
 
 ##### Scopes
-For OAuth2 security schemes, it is possible to define scopes using the `@SecurityScope [schema-name] [scope-code] [scope-description]` comment.
+For OAuth2 security schemes, it is possible to define scopes using the `@SecurityScope [schema-name] [scope-code] [scope-description]` comment. Scopes represent specific permissions that a user can grant to an application.
 
 ```go
-// @SecurityScope MyApiAuth read_user Read a user from the system
-// @SecurityScope MyApiAuth write_user Write a user to the system
+// @SecurityScope OAuth2 read_user Read user profile information
+// @SecurityScope OAuth2 write_user Create and modify user profile
+// @SecurityScope OAuth2 read_posts Read posts and comments
+// @SecurityScope OAuth2 write_posts Create and modify posts
 ```
+
+Scopes are associated with the security scheme they belong to. When you apply a security scheme to your API using `@Security`, the scopes you specify must exist in the corresponding scheme's scope definitions. For example:
+
+```go
+// Define the scheme with its scopes
+// @SecurityScheme OAuth2 oauth2AuthCode https://example.com/oauth/authorize https://example.com/oauth/token
+// @SecurityScope OAuth2 read_user Read user profile information
+// @SecurityScope OAuth2 write_user Create and modify user profile
+
+// Apply the scheme to your API, requesting specific scopes
+// @Security OAuth2 read_user write_user
+```
+
+This tells API documentation tools like Swagger/OpenAPI UI that users must grant both the `read_user` and `write_user` scopes when authenticating with your API.
 
 ### Handler funcs
 

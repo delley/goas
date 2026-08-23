@@ -226,6 +226,56 @@ func Test_parseResponseCommentAppliesJSONTypeToSchema(t *testing.T) {
 	}
 }
 
+func Test_parseBodyTypeUsesStringForAllBasicTypesBaseline(t *testing.T) {
+	tests := []struct {
+		goType string
+		want   string
+	}{
+		{goType: "bool", want: "boolean"},
+		{goType: "int", want: "integer"},
+		{goType: "float64", want: "number"},
+		{goType: "string", want: "string"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.goType, func(t *testing.T) {
+			p, err := setupParser()
+			require.NoError(t, err)
+
+			schema, err := p.parseBodyType(p.ModulePath, "main", test.goType)
+			require.NoError(t, err)
+			require.NotNil(t, schema.Type)
+			require.Equal(t, test.want, *schema.Type)
+		})
+	}
+}
+
+func Test_parseResponseCommentUsesStringForBasicTypesBaseline(t *testing.T) {
+	tests := []struct {
+		goType string
+		want   string
+	}{
+		{goType: "bool", want: "boolean"},
+		{goType: "int", want: "integer"},
+		{goType: "float64", want: "number"},
+		{goType: "string", want: "string"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.goType, func(t *testing.T) {
+			p, err := setupParser()
+			require.NoError(t, err)
+			operation := &openapi.OperationObject{Responses: openapi.ResponsesObject{}}
+
+			err = p.parseResponseComment(p.ModulePath, "main", operation, "200 object "+test.goType+" \"ok\"")
+			require.NoError(t, err)
+			schema := operation.Responses["200"].Content[openapi.ContentTypeText].Schema
+			require.NotNil(t, schema.Type)
+			require.Equal(t, test.want, *schema.Type)
+		})
+	}
+}
+
 func Test_parseResponseCommentWithoutPayloadHasNoContent(t *testing.T) {
 	p, err := setupParser()
 	require.NoError(t, err)
@@ -244,7 +294,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"oneOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"oneOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("anyOf", func(t *testing.T) {
@@ -254,7 +304,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"anyOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("allOf", func(t *testing.T) {
@@ -264,7 +314,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"allOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"allOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("case insensitive oneOf", func(t *testing.T) {
@@ -274,7 +324,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"oneOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"oneOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("case insensitive anyOf", func(t *testing.T) {
@@ -284,7 +334,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"anyOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("case insensitive allOf", func(t *testing.T) {
@@ -294,7 +344,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"allOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"allOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("not", func(t *testing.T) {
@@ -304,7 +354,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"not\":{\"type\":\"string\"}}", string(s))
+		require.Equal(t, "{\"not\":{\"type\":\"string\",\"format\":\"string\"}}", string(s))
 	})
 
 	t.Run("handles whitespace", func(t *testing.T) {
@@ -314,7 +364,7 @@ func Test_handleCompoundType(t *testing.T) {
 		require.NoError(t, err)
 		s, err := json.Marshal(result)
 		require.NoError(t, err)
-		require.Equal(t, "{\"allOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
+		require.Equal(t, "{\"allOf\":[{\"type\":\"string\",\"format\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}", string(s))
 	})
 
 	t.Run("not only accepts 1 arg", func(t *testing.T) {
@@ -416,7 +466,7 @@ func Test_parseEntryPointHelpers(t *testing.T) {
 		require.NoError(t, err)
 
 		oauthScopes := map[string]map[string]string{}
-		require.NoError(t, p.parseSecuritySchemeComment("oauth2 oauth2AuthCode https://example.com/auth https://example.com/token", oauthScopes))
+		require.NoError(t, p.parseSecuritySchemeComment("oauth2 oauth2AuthCode https://example.com/auth https://example.com/token", 1, oauthScopes))
 		require.NoError(t, p.parseSecurityScopeComment("oauth2 read Read access", oauthScopes))
 		require.NoError(t, p.parseTagsComment("@Tags \"Foo\" \"Bar\""))
 
@@ -427,18 +477,158 @@ func Test_parseEntryPointHelpers(t *testing.T) {
 		require.Equal(t, "Foo", p.OpenAPI.Tags[0].Name)
 	})
 
+	t.Run("rejects duplicate security scheme names with error", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		// First definition should succeed
+		err = p.parseSecuritySchemeComment("duplicate oauth2AuthCode https://example.com/auth https://example.com/token", 1, oauthScopes)
+		require.NoError(t, err)
+
+		// Second definition with same name should fail
+		err = p.parseSecuritySchemeComment("duplicate oauth2Implicit https://example.com/authorize", 2, oauthScopes)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "already defined")
+		require.Contains(t, err.Error(), "duplicate")
+
+		// Only first scheme should be registered
+		scheme := p.OpenAPI.Components.SecuritySchemes["duplicate"]
+		require.NotNil(t, scheme.OAuthFlows)
+		require.NotNil(t, scheme.OAuthFlows.AuthorizationCode)
+		require.Nil(t, scheme.OAuthFlows.Implicit)
+	})
+
 	t.Run("Keeps free-form descriptions with spaces for apiKey schemes", func(t *testing.T) {
 		p, err := setupParser()
 		require.NoError(t, err)
 
 		oauthScopes := map[string]map[string]string{}
-		require.NoError(t, p.parseSecuritySchemeComment("MyApiAuth apiKey header X-MyCustomHeader Login com seu token", oauthScopes))
+		require.NoError(t, p.parseSecuritySchemeComment("MyApiAuth apiKey header X-MyCustomHeader Login com seu token", 1, oauthScopes))
 
 		scheme, ok := p.OpenAPI.Components.SecuritySchemes["MyApiAuth"]
 		require.True(t, ok)
 		require.Equal(t, "header", scheme.In)
 		require.Equal(t, "X-MyCustomHeader", scheme.Name)
 		require.Equal(t, "Login com seu token", scheme.Description)
+	})
+
+	t.Run("oauth2 with authorization code flow", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		err = p.parseSecuritySchemeComment("oauth2authcode oauth2AuthCode https://example.com/auth https://example.com/token", 1, oauthScopes)
+		require.NoError(t, err)
+
+		scheme, ok := p.OpenAPI.Components.SecuritySchemes["oauth2authcode"]
+		require.True(t, ok)
+		require.Equal(t, "oauth2", scheme.Type)
+		require.NotNil(t, scheme.OAuthFlows)
+		require.NotNil(t, scheme.OAuthFlows.AuthorizationCode)
+		require.Equal(t, "https://example.com/auth", scheme.OAuthFlows.AuthorizationCode.AuthorizationURL)
+		require.Equal(t, "https://example.com/token", scheme.OAuthFlows.AuthorizationCode.TokenURL)
+		// Implicit, ResourceOwner, ClientCreds should be nil
+		require.Nil(t, scheme.OAuthFlows.Implicit)
+		require.Nil(t, scheme.OAuthFlows.ResourceOwnerPassword)
+		require.Nil(t, scheme.OAuthFlows.ClientCredentials)
+	})
+
+	t.Run("oauth2 with implicit flow", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		err = p.parseSecuritySchemeComment("oauth2implicit oauth2Implicit https://example.com/authorize", 1, oauthScopes)
+		require.NoError(t, err)
+
+		scheme, ok := p.OpenAPI.Components.SecuritySchemes["oauth2implicit"]
+		require.True(t, ok)
+		require.Equal(t, "oauth2", scheme.Type)
+		require.NotNil(t, scheme.OAuthFlows)
+		require.NotNil(t, scheme.OAuthFlows.Implicit)
+		require.Equal(t, "https://example.com/authorize", scheme.OAuthFlows.Implicit.AuthorizationURL)
+		require.Empty(t, scheme.OAuthFlows.Implicit.TokenURL) // Implicit flow should not have TokenURL
+		// Other flows should be nil
+		require.Nil(t, scheme.OAuthFlows.AuthorizationCode)
+		require.Nil(t, scheme.OAuthFlows.ResourceOwnerPassword)
+		require.Nil(t, scheme.OAuthFlows.ClientCredentials)
+	})
+
+	t.Run("oauth2 with resource owner password flow", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		err = p.parseSecuritySchemeComment("oauth2resourceowner oauth2ResourceOwnerCredentials https://example.com/token", 1, oauthScopes)
+		require.NoError(t, err)
+
+		scheme, ok := p.OpenAPI.Components.SecuritySchemes["oauth2resourceowner"]
+		require.True(t, ok)
+		require.Equal(t, "oauth2", scheme.Type)
+		require.NotNil(t, scheme.OAuthFlows)
+		require.NotNil(t, scheme.OAuthFlows.ResourceOwnerPassword)
+		require.Equal(t, "https://example.com/token", scheme.OAuthFlows.ResourceOwnerPassword.TokenURL)
+		require.Empty(t, scheme.OAuthFlows.ResourceOwnerPassword.AuthorizationURL) // Should not have AuthorizationURL
+		// Other flows should be nil
+		require.Nil(t, scheme.OAuthFlows.AuthorizationCode)
+		require.Nil(t, scheme.OAuthFlows.Implicit)
+		require.Nil(t, scheme.OAuthFlows.ClientCredentials)
+	})
+
+	t.Run("oauth2 with client credentials flow", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		err = p.parseSecuritySchemeComment("oauth2client oauth2ClientCredentials https://example.com/token", 1, oauthScopes)
+		require.NoError(t, err)
+
+		scheme, ok := p.OpenAPI.Components.SecuritySchemes["oauth2client"]
+		require.True(t, ok)
+		require.Equal(t, "oauth2", scheme.Type)
+		require.NotNil(t, scheme.OAuthFlows)
+		require.NotNil(t, scheme.OAuthFlows.ClientCredentials)
+		require.Equal(t, "https://example.com/token", scheme.OAuthFlows.ClientCredentials.TokenURL)
+		require.Empty(t, scheme.OAuthFlows.ClientCredentials.AuthorizationURL) // Should not have AuthorizationURL
+		// Other flows should be nil
+		require.Nil(t, scheme.OAuthFlows.AuthorizationCode)
+		require.Nil(t, scheme.OAuthFlows.Implicit)
+		require.Nil(t, scheme.OAuthFlows.ResourceOwnerPassword)
+	})
+
+	t.Run("oauth2 scheme with multiple scopes applied correctly", func(t *testing.T) {
+		p, err := setupParser()
+		require.NoError(t, err)
+
+		oauthScopes := map[string]map[string]string{}
+		// Define OAuth2 Authorization Code scheme
+		err = p.parseSecuritySchemeComment("oauth2multi oauth2AuthCode https://example.com/auth https://example.com/token", 1, oauthScopes)
+		require.NoError(t, err)
+
+		// Define multiple scopes for this scheme
+		err = p.parseSecurityScopeComment("oauth2multi read Read access", oauthScopes)
+		require.NoError(t, err)
+		err = p.parseSecurityScopeComment("oauth2multi write Write access", oauthScopes)
+		require.NoError(t, err)
+		err = p.parseSecurityScopeComment("oauth2multi delete Delete access", oauthScopes)
+		require.NoError(t, err)
+
+		// Verify scopes are stored in temporary map
+		require.Equal(t, 3, len(oauthScopes["oauth2multi"]))
+		require.Equal(t, "Read access", oauthScopes["oauth2multi"]["read"])
+		require.Equal(t, "Write access", oauthScopes["oauth2multi"]["write"])
+		require.Equal(t, "Delete access", oauthScopes["oauth2multi"]["delete"])
+
+		// Apply scopes to the OAuth2 scheme (simulating what parseEntryPoint does)
+		scheme := p.OpenAPI.Components.SecuritySchemes["oauth2multi"]
+		scheme.OAuthFlows.ApplyScopes(oauthScopes["oauth2multi"])
+
+		// Verify scopes are now in the AuthorizationCode flow
+		require.Equal(t, 3, len(scheme.OAuthFlows.AuthorizationCode.Scopes))
+		require.Equal(t, "Read access", scheme.OAuthFlows.AuthorizationCode.Scopes["read"])
+		require.Equal(t, "Write access", scheme.OAuthFlows.AuthorizationCode.Scopes["write"])
+		require.Equal(t, "Delete access", scheme.OAuthFlows.AuthorizationCode.Scopes["delete"])
 	})
 }
 

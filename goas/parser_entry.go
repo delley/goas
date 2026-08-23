@@ -12,7 +12,8 @@ import (
 
 // parseEntryPoint extracts metadata from the main file (title, version, servers, etc).
 func (p *parser) parseEntryPoint() error {
-	fileTree, err := goparser.ParseFile(token.NewFileSet(), p.MainFilePath, nil, goparser.ParseComments)
+	fset := token.NewFileSet()
+	fileTree, err := goparser.ParseFile(fset, p.MainFilePath, nil, goparser.ParseComments)
 	if err != nil {
 		return fmt.Errorf("can not parse general API information: %v", err)
 	}
@@ -23,6 +24,7 @@ func (p *parser) parseEntryPoint() error {
 
 	if fileTree.Comments != nil {
 		for i := range fileTree.Comments {
+			lineNum := fset.Position(fileTree.Comments[i].Pos()).Line
 			for _, comment := range strings.Split(fileTree.Comments[i].Text(), "\n") {
 				comment = strings.TrimSpace(comment)
 				if len(comment) == 0 {
@@ -37,9 +39,7 @@ func (p *parser) parseEntryPoint() error {
 				if len(value) == 0 {
 					continue
 				}
-				if err := p.parseGlobalServiceComments(attribute, value, oauthScopes); err != nil {
-					return err
-				}
+				p.parseGlobalServiceComments(attribute, value, lineNum, oauthScopes)
 			}
 		}
 	}
@@ -69,11 +69,18 @@ func (p *parser) parseEntryPoint() error {
 		}
 	}
 
+	// Return accumulated parsing errors (like duplicate security schemes)
+	if len(p.ParseErrors) > 0 {
+		// For now, return the first error; can be enhanced to collect all into a multi-error
+		return p.ParseErrors[0]
+	}
+
 	return nil
 }
 
 // parseGlobalServiceComments processes global service-level annotations.
-func (p *parser) parseGlobalServiceComments(attribute, value string, oauthScopes map[string]map[string]string) error {
+// Non-fatal errors (like duplicate security scheme names) are accumulated in p.ParseErrors.
+func (p *parser) parseGlobalServiceComments(attribute, value string, lineNum int, oauthScopes map[string]map[string]string) error {
 	switch attribute {
 	case "@version":
 		p.OpenAPI.Info.Version = value
@@ -132,7 +139,12 @@ func (p *parser) parseGlobalServiceComments(attribute, value string, oauthScopes
 		security := map[string][]string{spec.Name: spec.Scopes}
 		p.OpenAPI.Security = append(p.OpenAPI.Security, security)
 	case "@securityscheme":
-		return p.parseSecuritySchemeComment(value, oauthScopes)
+		err := p.parseSecuritySchemeComment(value, lineNum, oauthScopes)
+		if err != nil {
+			// Accumulate non-fatal errors instead of returning immediately
+			p.ParseErrors = append(p.ParseErrors, err)
+		}
+		return nil
 	case "@securityscope":
 		return p.parseSecurityScopeComment(value, oauthScopes)
 	case "@tags":
@@ -142,7 +154,8 @@ func (p *parser) parseGlobalServiceComments(attribute, value string, oauthScopes
 }
 
 // parseSecuritySchemeComment processes @securityscheme annotations.
-func (p *parser) parseSecuritySchemeComment(value string, oauthScopes map[string]map[string]string) error {
+// Returns an error if a security scheme with the same name is already defined.
+func (p *parser) parseSecuritySchemeComment(value string, lineNum int, oauthScopes map[string]map[string]string) error {
 	spec, err := annotate.ParseSecuritySchemeComment(value)
 	if err != nil {
 		return err
@@ -150,7 +163,19 @@ func (p *parser) parseSecuritySchemeComment(value string, oauthScopes map[string
 	if spec.Name == "" {
 		return nil
 	}
-	p.OpenAPI.Components.SecuritySchemes[spec.Name] = spec.ToOpenAPISecurityScheme()
+	spec.LineNumber = lineNum
+
+	// Check for duplicate security scheme name
+	if existing, exists := p.OpenAPI.Components.SecuritySchemes[spec.Name]; exists {
+		return fmt.Errorf("security scheme '%s' already defined at line %d", spec.Name, existing.LineNumber)
+	}
+
+	securityScheme := spec.ToOpenAPISecurityScheme()
+	// Store line number in the OpenAPI object for error reporting
+	if securityScheme != nil {
+		securityScheme.LineNumber = lineNum
+	}
+	p.OpenAPI.Components.SecuritySchemes[spec.Name] = securityScheme
 	return nil
 }
 

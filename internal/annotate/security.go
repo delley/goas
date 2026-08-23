@@ -17,6 +17,7 @@ type SecuritySchemeSpec struct {
 	Scheme      string
 	Description string
 	OAuthFlows  *SecuritySchemeOAuthFlowsSpec
+	LineNumber  int // Line number where this scheme was defined
 }
 
 // SecuritySchemeOAuthFlowsSpec captures OAuth2 flow metadata parsed from a security scheme.

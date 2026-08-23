@@ -59,6 +59,59 @@ func TestParseSecuritySchemeComment(t *testing.T) {
 		_, err := ParseSecuritySchemeComment("MyApiAuth oauth2 oauth2ClientCredentials")
 		require.EqualError(t, err, "OAuth2 client credentials scheme \"MyApiAuth\" requires a token URL")
 	})
+
+	t.Run("oauth2 implicit flow parses correctly", func(t *testing.T) {
+		spec, err := ParseSecuritySchemeComment("oauth2implicit oauth2Implicit https://example.com/authorize OAuth implicit flow")
+		require.NoError(t, err)
+		require.Equal(t, "oauth2implicit", spec.Name)
+		require.Equal(t, "oauth2", spec.Type)
+		require.NotNil(t, spec.OAuthFlows)
+		require.NotNil(t, spec.OAuthFlows.Implicit)
+		require.Equal(t, "https://example.com/authorize", spec.OAuthFlows.Implicit.AuthorizationURL)
+		require.Equal(t, "OAuth implicit flow", spec.Description)
+	})
+
+	t.Run("oauth2 implicit flow requires authorization url", func(t *testing.T) {
+		_, err := ParseSecuritySchemeComment("MyApiAuth oauth2Implicit")
+		require.EqualError(t, err, "OAuth2 implicit scheme \"MyApiAuth\" requires an authorization URL")
+	})
+
+	t.Run("oauth2 resource owner password flow parses correctly", func(t *testing.T) {
+		spec, err := ParseSecuritySchemeComment("oauth2resourceowner oauth2ResourceOwnerCredentials https://example.com/token OAuth resource owner flow")
+		require.NoError(t, err)
+		require.Equal(t, "oauth2resourceowner", spec.Name)
+		require.Equal(t, "oauth2", spec.Type)
+		require.NotNil(t, spec.OAuthFlows)
+		require.NotNil(t, spec.OAuthFlows.ResourceOwnerPassword)
+		require.Equal(t, "https://example.com/token", spec.OAuthFlows.ResourceOwnerPassword.TokenURL)
+		require.Equal(t, "OAuth resource owner flow", spec.Description)
+	})
+
+	t.Run("oauth2 resource owner password flow requires token url", func(t *testing.T) {
+		_, err := ParseSecuritySchemeComment("MyApiAuth oauth2ResourceOwnerCredentials")
+		require.EqualError(t, err, "OAuth2 resource owner credentials scheme \"MyApiAuth\" requires a token URL")
+	})
+
+	t.Run("oauth2 client credentials flow parses correctly", func(t *testing.T) {
+		spec, err := ParseSecuritySchemeComment("oauth2client oauth2ClientCredentials https://example.com/token OAuth client credentials flow")
+		require.NoError(t, err)
+		require.Equal(t, "oauth2client", spec.Name)
+		require.Equal(t, "oauth2", spec.Type)
+		require.NotNil(t, spec.OAuthFlows)
+		require.NotNil(t, spec.OAuthFlows.ClientCredentials)
+		require.Equal(t, "https://example.com/token", spec.OAuthFlows.ClientCredentials.TokenURL)
+		require.Equal(t, "OAuth client credentials flow", spec.Description)
+	})
+
+	t.Run("oauth2 client credentials flow requires token url", func(t *testing.T) {
+		_, err := ParseSecuritySchemeComment("MyApiAuth oauth2ClientCredentials")
+		require.EqualError(t, err, "OAuth2 client credentials scheme \"MyApiAuth\" requires a token URL")
+	})
+
+	t.Run("oauth2 authorization code flow requires both urls", func(t *testing.T) {
+		_, err := ParseSecuritySchemeComment("MyApiAuth oauth2AuthCode https://example.com/auth")
+		require.EqualError(t, err, "OAuth2 authorization code scheme \"MyApiAuth\" requires an authorization URL and a token URL")
+	})
 }
 
 func TestParseSecurityScopeComment(t *testing.T) {

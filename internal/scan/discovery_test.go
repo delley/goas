@@ -112,3 +112,41 @@ func main() {
 		t.Fatal("expected at least one package (root) from temporary module")
 	}
 }
+
+func TestDiscoverPackages_IncludesBuildExcludedPackageBaseline(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("failed to create go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("failed to create main.go: %v", err)
+	}
+
+	conditionalDir := filepath.Join(tmpDir, "conditional")
+	if err := os.Mkdir(conditionalDir, 0755); err != nil {
+		t.Fatalf("failed to create conditional package: %v", err)
+	}
+	conditionalFile := `//go:build wave11_never_enabled
+
+package conditional
+`
+	if err := os.WriteFile(filepath.Join(conditionalDir, "conditional.go"), []byte(conditionalFile), 0644); err != nil {
+		t.Fatalf("failed to create build-constrained Go file: %v", err)
+	}
+
+	ctx, err := load.ResolveModuleContext(tmpDir, "", "", "")
+	if err != nil {
+		t.Fatalf("ResolveModuleContext returned error: %v", err)
+	}
+	set, err := DiscoverPackages(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverPackages returned error: %v", err)
+	}
+
+	for _, pkg := range set.Packages {
+		if pkg.Path == conditionalDir {
+			return
+		}
+	}
+	t.Fatalf("expected build-excluded package %q in baseline discovery", conditionalDir)
+}
