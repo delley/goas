@@ -90,11 +90,10 @@ var (
 	arrayType  = "array"
 )
 
-// NewParser is retained only for legacy source compatibility with existing
-// package users. It is not part of the supported public contract; prefer
-// Generator and Options for all supported integrations. The returned value is
-// intentionally opaque because the underlying parser type is an internal
-// implementation detail.
+// Deprecated: NewParser is retained only for legacy source compatibility.
+// It is not part of the supported public contract; use Generator and Options
+// for all supported integrations. The returned value is intentionally opaque
+// because the underlying parser type is an internal implementation detail.
 func NewParser(modulePath, mainFilePath, handlerPath, descriptionRefPath string, debug, omitPackages, showHidden bool) (*parser, error) {
 	return newParserContext(context.Background(), modulePath, mainFilePath, handlerPath, descriptionRefPath, debug, omitPackages, showHidden)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"go/ast"
+	goparser "go/parser"
 	"go/token"
 	"os"
 	"os/exec"
@@ -25,6 +26,32 @@ func TestGenerateCancelledContext(t *testing.T) {
 
 	_, err := New().Generate(ctx, Options{ModulePath: "../example"})
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestNewParserLegacyCompatibility(t *testing.T) {
+	p, err := NewParser("../example", "main.go", "", "", false, true, false)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	require.NotEmpty(t, p.ModulePath)
+	require.Equal(t, filepath.Join(p.ModulePath, "main.go"), p.MainFilePath)
+}
+
+func TestNewParserIsDeprecated(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := goparser.ParseFile(fset, "parser.go", nil, goparser.ParseComments)
+	require.NoError(t, err)
+
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil || fn.Name.Name != "NewParser" {
+			continue
+		}
+		require.NotNil(t, fn.Doc)
+		require.Contains(t, fn.Doc.Text(), "Deprecated:")
+		return
+	}
+
+	t.Fatal("NewParser declaration not found")
 }
 
 func TestNewParserUsesToolchainModuleCache(t *testing.T) {

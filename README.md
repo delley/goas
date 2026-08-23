@@ -12,7 +12,7 @@ The public contract is intentionally small: the root package exposes the generat
 
 ## Public API and compatibility
 
-The supported public surface is the `Generator` API (`New()`, `Generate()`, and `GenerateTo()`) plus the `Options` configuration type. `NewParser` remains exported for source compatibility with older integrations, but it is deliberately marked as a legacy compatibility entry point and should not be used in new code. The underlying parser value is intentionally opaque because it is an internal implementation detail rather than a supported public type.
+The supported public surface is the `Generator` API (`New()`, `Generate()`, and `GenerateTo()`) plus the `Options` configuration type. `NewParser` remains exported only for source compatibility with older integrations and is now deprecated: it is a legacy compatibility entry point and should not be used in new code. The underlying parser value is intentionally opaque because it is an internal implementation detail rather than a supported public type.
 
 ## Limit
 - Only support go module.
