@@ -179,18 +179,23 @@ func PostUser() {
 @Resource {resource}
 @Resource users
 
-@Tags {tag}
-@Tags xxx
+@Tags "{tag}" ["{description}"]
+@Tags "users" "Operations related to users"
 ```
 - {resource}, {tag}: Tag of the route.
+- `@Tags` requires quoted names; a description is optional and must also be quoted.
 
 #### Route
 ```
 @Route {path}    {method}
 @Route /api/user [post]
+
+@Router {path}   {method}
+@Router /api/user [post]
 ```
 - {path}: The URL path.
 - {method}: The HTTP Method. Must be put in brackets.
+- `@Router` is kept as a compatibility alias of `@Route` and is accepted in the parser.
 
 ### Documentation Generation
 
@@ -211,7 +216,14 @@ From a module whose main file is in a different directory:
 goas --module-path . --main-file-path ./cmd/xxx/main.go --output oas.json
 ```
 
-The entrypoint file must be under the module root or be provided explicitly with `--main-file-path`; service-level comments in other Go files are not read as global comments.
+When running the example as a separate Go module, build the binary once at the repository root and invoke it from the example directory:
+```
+go build -o ./goas-cli ./cmd/goas
+cd example
+../goas-cli --module-path . --main-file-path ./main.go --output ./example.json
+```
+
+The `go run ../cmd/goas` form is not valid from inside the `example` module because the command package is outside the active module. The entrypoint file must be under the module root or be provided explicitly with `--main-file-path`; service-level comments in other Go files are not read as global comments.
 
 ### Command-line options
 

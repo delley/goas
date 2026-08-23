@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/delley/goas/goas"
+	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli"
 )
 
@@ -223,4 +224,15 @@ func TestRunWritesOutputAtomicallyOnSuccess(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("successful file output wrote errors to stderr: %q", stderr.String())
 	}
+}
+
+func TestReadmeContractExamples(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	require.NoError(t, err)
+
+	text := string(content)
+	require.NotContains(t, text, "@Tags xxx")
+	require.Contains(t, text, "@Tags \"{tag}\"")
+	require.Contains(t, text, "@Router")
+	require.NotContains(t, text, "(cd example && go run ../cmd/goas --module-path . --main-file-path ./main.go --output ./example.json)")
 }
