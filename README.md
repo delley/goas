@@ -8,6 +8,8 @@ The project is based on
 
 Generate [OpenAPI Specification](https://swagger.io/specification) json file with comments in Go.
 
+The public contract is intentionally small: the root package exposes only the generation facade and compatibility helpers, while parsing, schema resolution, and package discovery live under internal packages. This keeps the OpenAPI model independent from orchestration and avoids parallel registries.
+
 ## Limit
 - Only support go module.
 - Anonymous struct field is not supported.

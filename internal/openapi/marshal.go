@@ -7,7 +7,8 @@ type MarshalOptions struct {
 	Indent string
 }
 
-// Marshal serialize the spec to JSON with indentation.
+// Marshal serializes an OpenAPI document to JSON. It is the only serialization
+// boundary used by the generator; parsing and schema registries do not marshal.
 func Marshal(spec *OpenAPIObject, opt MarshalOptions) ([]byte, error) {
 	prefix := opt.Prefix
 	indent := opt.Indent

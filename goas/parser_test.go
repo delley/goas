@@ -11,7 +11,10 @@ import (
 	"regexp"
 	"testing"
 
+	astpkg "github.com/delley/goas/internal/ast"
+	internalImports "github.com/delley/goas/internal/imports"
 	"github.com/delley/goas/internal/openapi"
+	internalSchema "github.com/delley/goas/internal/schema"
 	"github.com/jarcoal/httpmock"
 	"github.com/stretchr/testify/require"
 )
@@ -228,10 +231,12 @@ func Test_handleCompoundType(t *testing.T) {
 	})
 }
 
-func Test_addSchemaRefLinkPrefix_emptyNameIsSafe(t *testing.T) {
-	require.Equal(t, "", addSchemaRefLinkPrefix(""))
-	require.Equal(t, "#/components/schemas/User", addSchemaRefLinkPrefix("User"))
-	require.Equal(t, "#/components/schemas/User", addSchemaRefLinkPrefix("#/components/schemas/User"))
+func TestSchemaRef_emptyNameIsSafe(t *testing.T) {
+	require.Equal(t, "", openapi.SchemaRef(""))
+	require.Equal(t, "#/components/schemas/User", openapi.SchemaRef("User"))
+	require.Equal(t, "#/components/schemas/User", openapi.SchemaRef("#/components/schemas/User"))
+	require.Equal(t, "#/components/schemas/User/Type", openapi.SchemaRef("User\\Type"))
+	require.Equal(t, "#/components/schemas/User/Type", openapi.SchemaRef("#/components/schemas/User\\Type"))
 }
 
 func Test_descriptions(t *testing.T) {
@@ -405,13 +410,13 @@ func Test_validateSchemaNames(t *testing.T) {
 	})
 
 	t.Run("Schema registry validates aliases independently", func(t *testing.T) {
-		reg := newSchemaRegistry(false)
-		reg.apiSchemaNames["pkg/foo/bar"] = map[string]string{}
-		reg.apiSchemaNames["pkg/foo/bar"]["BarRecord"] = "Record"
-		reg.apiSchemaNames["pkg/baz/qux"] = map[string]string{}
-		reg.apiSchemaNames["pkg/baz/qux"]["QuxRecord"] = "Record"
+		reg := internalSchema.NewRegistry(false)
+		reg.ApiSchemaNames["pkg/foo/bar"] = map[string]string{}
+		reg.ApiSchemaNames["pkg/foo/bar"]["BarRecord"] = "Record"
+		reg.ApiSchemaNames["pkg/baz/qux"] = map[string]string{}
+		reg.ApiSchemaNames["pkg/baz/qux"]["QuxRecord"] = "Record"
 
-		require.Error(t, reg.validateSchemaNames())
+		require.Error(t, reg.ValidateSchemaNames())
 	})
 }
 
@@ -419,24 +424,24 @@ func Test_astPackageCache(t *testing.T) {
 	p, err := setupParser()
 	require.NoError(t, err)
 
-	cache := newASTPackageCache()
-	moduleAST, err := cache.getPkgAst(p.ModulePath)
+	cache := astpkg.NewPackageCache()
+	moduleAST, err := cache.GetPackageAST(p.ModulePath)
 	require.NoError(t, err)
 	require.NotEmpty(t, moduleAST)
 
-	cachedAgain, err := cache.getPkgAst(p.ModulePath)
+	cachedAgain, err := cache.GetPackageAST(p.ModulePath)
 	require.NoError(t, err)
 	require.Equal(t, len(moduleAST), len(cachedAgain))
 }
 
 func Test_importRegistryTracksAliases(t *testing.T) {
-	reg := newImportRegistry()
-	reg.recordImport("example.com/foo", "github.com/example/pkg", "pkg")
-	reg.recordImport("example.com/foo", "github.com/example/pkg", "pkg")
-	reg.recordImport("example.com/foo", "github.com/example/other", "other")
+	reg := internalImports.NewRegistry()
+	reg.Record("example.com/foo", "github.com/example/pkg", "pkg")
+	reg.Record("example.com/foo", "github.com/example/pkg", "pkg")
+	reg.Record("example.com/foo", "github.com/example/other", "other")
 
-	require.Len(t, reg.pkgNameImportedPkgAlias["example.com/foo"]["pkg"], 1)
-	require.Len(t, reg.pkgNameImportedPkgAlias["example.com/foo"]["other"], 1)
+	require.Len(t, reg.PkgNameImportedPkgAlias["example.com/foo"]["pkg"], 1)
+	require.Len(t, reg.PkgNameImportedPkgAlias["example.com/foo"]["other"], 1)
 }
 
 func Test_parseOverrideStructTag(t *testing.T) {
@@ -455,6 +460,15 @@ func Test_parseOverrideStructTag(t *testing.T) {
 		require.Equal(t, "Test", result)
 	})
 }
+
+func Test_parseResourcesUseInternalRegistries(t *testing.T) {
+	resources := newParseResources()
+
+	require.IsType(t, &internalImports.Registry{}, resources.importRegistry)
+	require.IsType(t, &astpkg.PackageCache{}, resources.astCache)
+	require.NotNil(t, resources.astCache)
+}
+
 func Test_parseGoMod(t *testing.T) {
 	t.Run("Successfully parses go.mod file", func(t *testing.T) {
 		p, err := setupParser()

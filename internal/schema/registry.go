@@ -10,6 +10,8 @@ import (
 )
 
 // Registry owns schema names, schema identity deduplication, and conflict validation.
+// It depends on annotation parsing and OpenAPI schema models, but does not
+// depend on module loading or JSON serialization.
 type Registry struct {
 	OmitPackages   bool
 	KnownIDSchema  map[string]*openapi.SchemaObject

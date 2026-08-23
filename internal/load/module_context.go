@@ -7,7 +7,8 @@ import (
 )
 
 // ModuleContext holds the resolved module metadata and path configuration used
-// during parser initialization.
+// during parser initialization. It is an internal boundary: load resolves
+// filesystem and toolchain state, while parsing consumes the resulting values.
 type ModuleContext struct {
 	ModulePath     string
 	ModuleName     string

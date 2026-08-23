@@ -2,7 +2,8 @@ package imports
 
 import "strings"
 
-// Registry tracks package aliases per importing package.
+// Registry tracks package aliases per importing package. The parser owns the
+// registry; this package only records and resolves import naming decisions.
 type Registry struct {
 	PkgNameImportedPkgAlias map[string]map[string][]string
 }
@@ -11,6 +12,7 @@ func NewRegistry() *Registry {
 	return &Registry{PkgNameImportedPkgAlias: map[string]map[string][]string{}}
 }
 
+// Record associates an import alias with an imported package for a package.
 func (r *Registry) Record(pkgName, importedPkgName, alias string) {
 	if r.PkgNameImportedPkgAlias[pkgName] == nil {
 		r.PkgNameImportedPkgAlias[pkgName] = map[string][]string{}
@@ -24,6 +26,7 @@ func (r *Registry) Record(pkgName, importedPkgName, alias string) {
 	r.PkgNameImportedPkgAlias[pkgName][alias] = append(imports, importedPkgName)
 }
 
+// AliasFor returns the recorded alias for an imported package, or an empty string.
 func (r *Registry) AliasFor(pkgName, importedPkgName string) string {
 	for alias, packageNames := range r.PkgNameImportedPkgAlias[pkgName] {
 		for _, imported := range packageNames {
@@ -35,6 +38,7 @@ func (r *Registry) AliasFor(pkgName, importedPkgName string) string {
 	return ""
 }
 
+// ResolveAlias returns an explicit alias or the final component of an import path.
 func ResolveAlias(astImportPath string, explicitAlias string) string {
 	if explicitAlias != "" && explicitAlias != "." && explicitAlias != "_" {
 		return explicitAlias

@@ -13,14 +13,20 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/delley/goas/internal/annotate"
+	astpkg "github.com/delley/goas/internal/ast"
 	"github.com/delley/goas/internal/desc"
+	internalImports "github.com/delley/goas/internal/imports"
 	"github.com/delley/goas/internal/load"
 	"github.com/delley/goas/internal/openapi"
+	"github.com/delley/goas/internal/scan"
+	internalSchema "github.com/delley/goas/internal/schema"
+	internalTypes "github.com/delley/goas/internal/types"
 	"github.com/iancoleman/orderedmap"
 	module "golang.org/x/mod/modfile"
 )
@@ -44,7 +50,7 @@ type parser struct {
 
 	OpenAPI openapi.OpenAPIObject
 
-	schemaRegistry *schemaRegistry
+	schemaRegistry *internalSchema.Registry
 	resources      *parseResources
 
 	CorePkgs      map[string]bool
@@ -64,20 +70,17 @@ type parser struct {
 	FileRefPath  string
 }
 
-type pkg struct {
-	Name string
-	Path string
-}
+type pkg = scan.Package
 
 type parseResources struct {
-	astCache       *astPackageCache
-	importRegistry *importRegistry
+	astCache       *astpkg.PackageCache
+	importRegistry *internalImports.Registry
 }
 
 func newParseResources() *parseResources {
 	return &parseResources{
-		astCache:       newASTPackageCache(),
-		importRegistry: newImportRegistry(),
+		astCache:       astpkg.NewPackageCache(),
+		importRegistry: internalImports.NewRegistry(),
 	}
 }
 
@@ -116,9 +119,9 @@ func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath
 		FileRefPath:   descriptionRefPath,
 	}
 	p.resources = newParseResources()
-	p.schemaRegistry = newSchemaRegistry(omitPackages)
-	p.KnownIDSchema = p.schemaRegistry.knownIDSchema
-	p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+	p.schemaRegistry = internalSchema.NewRegistry(omitPackages)
+	p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
+	p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
 	p.OpenAPI.OpenAPI = openapi.OpenAPIVersion
 	p.OpenAPI.Paths = make(openapi.PathsObject)
 	p.OpenAPI.Security = []map[string][]string{}
@@ -209,11 +212,11 @@ func (p *parser) contextErr() error {
 
 func (p *parser) validateSchemaNames() error {
 	if p.schemaRegistry == nil {
-		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
-		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
-		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+		p.schemaRegistry = internalSchema.NewRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
 	}
-	return p.schemaRegistry.validateSchemaNames()
+	return p.schemaRegistry.ValidateSchemaNames()
 }
 
 func (p *parser) parseGlobalServiceComments(attribute, value string, oauthScopes map[string]map[string]string) error {
@@ -385,34 +388,22 @@ func (p *parser) parseEntryPoint() error {
 }
 
 func (p *parser) parseModule() error {
-	walker := func(path string, info os.FileInfo, err error) error {
-		if contextErr := p.contextErr(); contextErr != nil {
-			return contextErr
-		}
-		if err != nil {
+	moduleCtx := &load.ModuleContext{ModulePath: p.ModulePath, ModuleName: p.ModuleName}
+	pkgSet, err := scan.DiscoverPackages(moduleCtx)
+	if err != nil {
+		return err
+	}
+	for _, discovered := range pkgSet.Packages {
+		if err := p.contextErr(); err != nil {
 			return err
 		}
-		if info != nil && info.IsDir() {
-			if strings.HasPrefix(strings.Trim(strings.TrimPrefix(path, p.ModulePath), "/"), ".git") {
-				return nil
-			}
-			fns, err := filepath.Glob(filepath.Join(path, "*.go"))
-			if len(fns) == 0 || err != nil {
-				return nil
-			}
-			// p.debug(path)
-			name := filepath.Join(p.ModuleName, strings.TrimPrefix(path, p.ModulePath))
-			name = filepath.ToSlash(name)
-			p.KnownPkgs = append(p.KnownPkgs, pkg{
-				Name: name,
-				Path: path,
-			})
-			p.KnownNamePkg[name] = &p.KnownPkgs[len(p.KnownPkgs)-1]
-			p.KnownPathPkg[path] = &p.KnownPkgs[len(p.KnownPkgs)-1]
-		}
-		return nil
+		p.KnownPkgs = append(p.KnownPkgs, pkg{
+			Name: discovered.Name,
+			Path: discovered.Path,
+		})
+		p.KnownNamePkg[discovered.Name] = &p.KnownPkgs[len(p.KnownPkgs)-1]
+		p.KnownPathPkg[discovered.Path] = &p.KnownPkgs[len(p.KnownPkgs)-1]
 	}
-	filepath.Walk(p.ModulePath, walker)
 	return nil
 }
 
@@ -502,7 +493,7 @@ func (p *parser) getPkgAst(pkgPath string) (map[string]*ast.Package, error) {
 	if p.resources == nil {
 		p.resources = newParseResources()
 	}
-	return p.resources.astCache.getPkgAst(pkgPath)
+	return p.resources.astCache.GetPackageAST(pkgPath)
 }
 
 func (p *parser) parseAPIs() error {
@@ -541,11 +532,11 @@ func (p *parser) parseImportStatements() error {
 					importedPkgName := strings.Trim(astImport.Path.Value, "\"")
 					importedPkgAlias := ""
 					if astImport.Name != nil {
-						importedPkgAlias = p.resources.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, &importName{Name: astImport.Name.Name})
+						importedPkgAlias = internalImports.ResolveAlias(importedPkgName, astImport.Name.Name)
 					} else {
-						importedPkgAlias = p.resources.importRegistry.resolveImportedPkgAlias(pkgName, importedPkgName, nil)
+						importedPkgAlias = internalImports.ResolveAlias(importedPkgName, "")
 					}
-					p.resources.importRegistry.recordImport(pkgName, importedPkgName, importedPkgAlias)
+					p.resources.importRegistry.Record(pkgName, importedPkgName, importedPkgAlias)
 				}
 			}
 		}
@@ -625,11 +616,11 @@ func (p *parser) parseTypeSpecs() error {
 
 func (p *parser) parseTypeAnnotations(pkgName string, typeName string, commentGroup *ast.CommentGroup) error {
 	if p.schemaRegistry == nil {
-		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
-		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
-		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+		p.schemaRegistry = internalSchema.NewRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
 	}
-	return p.schemaRegistry.parseTypeAnnotations(pkgName, typeName, commentGroup)
+	return p.schemaRegistry.ParseTypeAnnotations(pkgName, typeName, commentGroup)
 }
 
 func (p *parser) parsePaths() error {
@@ -715,9 +706,9 @@ func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comm
 				resource = "others"
 			}
 
-			if !isInStringList(tagList, resource) && !p.ShowHidden {
+			if !slices.Contains(tagList, resource) && !p.ShowHidden {
 				err = fmt.Errorf("could not find tag \"%s\" in the main list of tags", resource)
-			} else if !isInStringList(operation.Tags, resource) {
+			} else if !slices.Contains(operation.Tags, resource) {
 				operation.Tags = append(operation.Tags, resource)
 			}
 		case "@route", "@router":
@@ -779,11 +770,11 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *openapi.O
 				},
 				Description: spec.Description,
 			})
-		} else if isGoTypeOASType(spec.GoType) {
-			localGoType := goTypesOASTypes[spec.GoType]
+		} else if internalTypes.IsGoTypeOASType(spec.GoType) {
+			localGoType := internalTypes.GetOASType(spec.GoType)
 			operation.RequestBody.Content[openapi.ContentTypeForm].Schema.Properties.Set(spec.Name, &openapi.SchemaObject{
 				Type:        &localGoType,
-				Format:      goTypesOASFormats[spec.GoType],
+				Format:      internalTypes.GetOASFormat(spec.GoType),
 				Description: spec.Description,
 			})
 		}
@@ -808,11 +799,11 @@ func (p *parser) parseParamComment(pkgPath, pkgName string, operation *openapi.O
 				p.debug("parseParamComment cannot parse goType", spec.GoType)
 			}
 			operation.Parameters = append(operation.Parameters, parameterObject)
-		} else if isGoTypeOASType(spec.GoType) {
-			localGoType := goTypesOASTypes[spec.GoType]
+		} else if internalTypes.IsGoTypeOASType(spec.GoType) {
+			localGoType := internalTypes.GetOASType(spec.GoType)
 			parameterObject.Schema = &openapi.SchemaObject{
 				Type:        &localGoType,
-				Format:      goTypesOASFormats[spec.GoType],
+				Format:      internalTypes.GetOASFormat(spec.GoType),
 				Description: spec.Description,
 			}
 			operation.Parameters = append(operation.Parameters, parameterObject)
@@ -866,13 +857,13 @@ func (p *parser) parseBodyType(pkgPath, pkgName, typeName string) (*openapi.Sche
 	if err != nil {
 		return nil, err
 	}
-	if isBasicGoType(registeredTypeName) {
+	if internalTypes.IsBasicGoType(registeredTypeName) {
 		return &openapi.SchemaObject{
 			Type: &stringType,
 		}, nil
 	} else {
 		return &openapi.SchemaObject{
-			Ref: addSchemaRefLinkPrefix(registeredTypeName),
+			Ref: openapi.SchemaRef(registeredTypeName),
 		}, nil
 	}
 }
@@ -904,13 +895,13 @@ func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *openap
 			if err != nil {
 				return err
 			}
-			if isBasicGoType(typeName) {
+			if internalTypes.IsBasicGoType(typeName) {
 				responseObject.Content[openapi.ContentTypeText] = &openapi.MediaTypeObject{
 					Schema: openapi.SchemaObject{Type: &stringType},
 				}
 			} else {
 				responseObject.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{
-					Schema: openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeName)},
+					Schema: openapi.SchemaObject{Ref: openapi.SchemaRef(typeName)},
 				}
 			}
 		}
@@ -1008,7 +999,7 @@ func (p *parser) getSchemaObjectCached(pkgPath, pkgName, typeName string) (*open
 func (p *parser) registerType(pkgPath, pkgName, typeName string) (string, error) {
 	var registerTypeName string
 
-	if isBasicGoType(typeName) {
+	if internalTypes.IsBasicGoType(typeName) {
 		registerTypeName = typeName
 	} else {
 		schemaObject, err := p.getSchemaObjectCached(pkgPath, pkgName, typeName)
@@ -1087,7 +1078,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		itemTypeName := typeName[2:]
 		schema, ok := p.KnownIDSchema[p.genSchemaObjectID(pkgName, itemTypeName)]
 		if ok {
-			schemaObject.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
+			schemaObject.Items = &openapi.SchemaObject{Ref: openapi.SchemaRef(schema.ID)}
 			return &schemaObject, nil
 		}
 
@@ -1097,7 +1088,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		}
 
 		if newParsedSchema.ID != "" {
-			schemaObject.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(newParsedSchema.ID)}
+			schemaObject.Items = &openapi.SchemaObject{Ref: openapi.SchemaRef(newParsedSchema.ID)}
 			return &schemaObject, nil
 		}
 
@@ -1108,7 +1099,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		itemTypeName := typeName[5:]
 		schema, ok := p.KnownIDSchema[p.genSchemaObjectID(pkgName, itemTypeName)]
 		if ok {
-			schemaObject.AdditionalProperties = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(schema.ID)}
+			schemaObject.AdditionalProperties = &openapi.SchemaObject{Ref: openapi.SchemaRef(schema.ID)}
 			return &schemaObject, nil
 		}
 		schemaProperty, err := p.parseSchemaObject(pkgPath, pkgName, itemTypeName, true)
@@ -1128,8 +1119,8 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 	} else if strings.HasPrefix(typeName, "interface{}") {
 		schemaObject.Type = nil
 		return &schemaObject, nil
-	} else if isGoTypeOASType(typeName) {
-		localGoType := goTypesOASTypes[typeName]
+	} else if internalTypes.IsGoTypeOASType(typeName) {
+		localGoType := internalTypes.GetOASType(typeName)
 		schemaObject.Type = &localGoType
 		return &schemaObject, nil
 	}
@@ -1168,8 +1159,8 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		if !exist {
 			found := false
 			if p.resources != nil {
-				for k := range p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName] {
-					if k == guessPkgName && len(p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName][guessPkgName]) != 0 {
+				for k := range p.resources.importRegistry.PkgNameImportedPkgAlias[pkgName] {
+					if k == guessPkgName && len(p.resources.importRegistry.PkgNameImportedPkgAlias[pkgName][guessPkgName]) != 0 {
 						found = true
 						break
 					}
@@ -1179,7 +1170,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 				p.debugf("unknown guess %s ast.TypeSpec in package %s", guessTypeName, guessPkgName)
 				return &schemaObject, nil
 			}
-			guessPkgName = p.resources.importRegistry.pkgNameImportedPkgAlias[pkgName][guessPkgName][0]
+			guessPkgName = p.resources.importRegistry.PkgNameImportedPkgAlias[pkgName][guessPkgName][0]
 			guessPkgPath = ""
 			for i := range p.KnownPkgs {
 				if guessPkgName == p.KnownPkgs[i].Name {
@@ -1207,9 +1198,9 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		pkgPath, pkgName = guessPkgPath, guessPkgName
 	}
 
-	if isGoTypeOASType(p.getTypeAsString(typeSpec.Type)) && schemaObject.Ref == "" {
-		typeAsString := p.getTypeAsString(typeSpec.Type)
-		localGoType := goTypesOASTypes[typeAsString]
+	if internalTypes.IsGoTypeOASType(internalTypes.TypeAsString(typeSpec.Type)) && schemaObject.Ref == "" {
+		typeAsString := internalTypes.TypeAsString(typeSpec.Type)
+		localGoType := internalTypes.GetOASType(typeAsString)
 		schemaObject.Type = &localGoType
 		checkFormatInt64(typeAsString, &schemaObject)
 
@@ -1219,7 +1210,7 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		if err != nil {
 			return nil, err
 		}
-		schemaObject.Ref = addSchemaRefLinkPrefix(newSchema.ID)
+		schemaObject.Ref = openapi.SchemaRef(newSchema.ID)
 	} else if astStructType, ok := typeSpec.Type.(*ast.StructType); ok {
 		schemaObject.Type = &objectType
 		if astStructType.Fields != nil {
@@ -1231,19 +1222,19 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		typeAsString := p.getTypeAsString(astArrayType.Elt)
 		typeAsString = strings.TrimLeft(typeAsString, "*")
 
-		if !isBasicGoType(typeAsString) {
+		if !internalTypes.IsBasicGoType(typeAsString) {
 			itemsSchema, err := p.getSchemaObjectCached(pkgPath, pkgName, typeAsString)
 			if err != nil {
 				p.debug("parseSchemaObject parse array items err:", err)
 			} else {
 				if itemsSchema.ID != "" {
-					schemaObject.Items.Ref = addSchemaRefLinkPrefix(itemsSchema.ID)
+					schemaObject.Items.Ref = openapi.SchemaRef(itemsSchema.ID)
 				} else {
 					*schemaObject.Items = *itemsSchema
 				}
 			}
-		} else if isGoTypeOASType(typeAsString) {
-			localGoType := goTypesOASTypes[typeAsString]
+		} else if internalTypes.IsGoTypeOASType(typeAsString) {
+			localGoType := internalTypes.GetOASType(typeAsString)
 			schemaObject.Items.Type = &localGoType
 		}
 	} else if astMapType, ok := typeSpec.Type.(*ast.MapType); ok {
@@ -1252,19 +1243,19 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 		schemaObject.AdditionalProperties = propertySchema
 		typeAsString := p.getTypeAsString(astMapType.Value)
 		typeAsString = strings.TrimLeft(typeAsString, "*")
-		if !isBasicGoType(typeAsString) {
+		if !internalTypes.IsBasicGoType(typeAsString) {
 			keySchema, err := p.getSchemaObjectCached(pkgPath, pkgName, typeAsString)
 			if err != nil {
 				p.debug("parseSchemaObject parse array items err:", err)
 			} else {
 				if keySchema.ID != "" {
-					propertySchema.Ref = addSchemaRefLinkPrefix(keySchema.ID)
+					propertySchema.Ref = openapi.SchemaRef(keySchema.ID)
 				} else {
 					*propertySchema = *keySchema
 				}
 			}
-		} else if isGoTypeOASType(typeAsString) {
-			localGoType := goTypesOASTypes[typeAsString]
+		} else if internalTypes.IsGoTypeOASType(typeAsString) {
+			localGoType := internalTypes.GetOASType(typeAsString)
 			propertySchema.Type = &localGoType
 		}
 	} else if selectorType, ok := typeSpec.Type.(*ast.SelectorExpr); ok {
@@ -1311,15 +1302,15 @@ func (p *parser) parseSchemaObject(pkgPath, pkgName, typeName string, register b
 	// we don't want to register 3rd party library types
 	if register {
 		if p.schemaRegistry == nil {
-			p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
-			p.KnownIDSchema = p.schemaRegistry.knownIDSchema
-			p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+			p.schemaRegistry = internalSchema.NewRegistry(p.OmitPackages)
+			p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
+			p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
 		}
-		if err := p.schemaRegistry.registerSchemaObject(pkgName, typeName, &schemaObject); err != nil {
+		if err := p.schemaRegistry.RegisterSchemaObject(pkgName, typeName, &schemaObject); err != nil {
 			return nil, err
 		}
-		if _, ok := p.OpenAPI.Components.Schemas[replaceBackslash(schemaObject.ID)]; !ok {
-			p.OpenAPI.Components.Schemas[replaceBackslash(schemaObject.ID)] = &schemaObject
+		if _, ok := p.OpenAPI.Components.Schemas[openapi.NormalizeComponentSchemaKey(schemaObject.ID)]; !ok {
+			p.OpenAPI.Components.Schemas[openapi.NormalizeComponentSchemaKey(schemaObject.ID)] = &schemaObject
 		}
 	}
 
@@ -1346,7 +1337,7 @@ func (p *parser) parseAstFields(pkgPath, pkgName string, structSchema *openapi.S
 
 func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *openapi.SchemaObject, astField *ast.Field) {
 	fieldSchema := &openapi.SchemaObject{}
-	typeAsString := p.getTypeAsString(astField.Type)
+	typeAsString := internalTypes.TypeAsString(astField.Type)
 	if renderedStruct := parseOverrideStructTag(astField); renderedStruct != "" {
 		typeAsString = renderedStruct
 	}
@@ -1355,9 +1346,9 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *openapi.Sc
 	isInterface := strings.HasPrefix(typeAsString, "interface{}")
 	if isSliceOrMap || isInterface || typeAsString == "time.Time" || typeAsString == "uuid.UUID" {
 		splitType := strings.Split(typeAsString, "]")
-		if len(splitType) > 1 && !isBasicGoType(splitType[1]) {
+		if len(splitType) > 1 && !internalTypes.IsBasicGoType(splitType[1]) {
 			if _, ok := p.KnownIDSchema[splitType[1]]; ok {
-				nestedType := p.getTypeAsString(splitType[1])
+				nestedType := internalTypes.TypeAsString(splitType[1])
 				setNestedFieldSchemaProps(splitType[0], nestedType, fieldSchema, structSchema)
 			} else {
 				var err error
@@ -1376,16 +1367,16 @@ func (p *parser) parseAstField(pkgPath, pkgName string, structSchema *openapi.Sc
 				return
 			}
 		}
-	} else if !isBasicGoType(typeAsString) {
+	} else if !internalTypes.IsBasicGoType(typeAsString) {
 		fieldSchemaObjectID, err := p.registerType(pkgPath, pkgName, typeAsString)
 		if err != nil {
 			p.debug("parseSchemaPropertiesFromStructFields err:", err)
 		} else {
 			fieldSchema.ID = fieldSchemaObjectID
-			fieldSchema.Ref = addSchemaRefLinkPrefix(fieldSchemaObjectID)
+			fieldSchema.Ref = openapi.SchemaRef(fieldSchemaObjectID)
 		}
-	} else if isGoTypeOASType(typeAsString) {
-		localGoType := goTypesOASTypes[typeAsString]
+	} else if internalTypes.IsGoTypeOASType(typeAsString) {
+		localGoType := internalTypes.GetOASType(typeAsString)
 		fieldSchema.Type = &localGoType
 		checkFormatInt64(typeAsString, fieldSchema)
 	}
@@ -1457,35 +1448,10 @@ func (p *parser) parseSchemaPropertiesFromStructFields(pkgPath, pkgName string, 
 	p.parseAstFields(pkgPath, pkgName, structSchema, astFields)
 }
 
+// getTypeAsString delegates to internal/types.TypeAsString for backward compatibility.
+// This method can be removed after all callers are updated to use internalTypes.TypeAsString directly.
 func (p *parser) getTypeAsString(fieldType interface{}) string {
-	astArrayType, ok := fieldType.(*ast.ArrayType)
-	if ok {
-		return fmt.Sprintf("[]%v", p.getTypeAsString(astArrayType.Elt))
-	}
-
-	astMapType, ok := fieldType.(*ast.MapType)
-	if ok {
-		return fmt.Sprintf("map[]%v", p.getTypeAsString(astMapType.Value))
-	}
-
-	_, ok = fieldType.(*ast.InterfaceType)
-	if ok {
-		return "interface{}"
-	}
-
-	astStarExpr, ok := fieldType.(*ast.StarExpr)
-	if ok {
-		// return fmt.Sprintf("*%v", p.getTypeAsString(astStarExpr.X))
-		return fmt.Sprintf("%v", p.getTypeAsString(astStarExpr.X))
-	}
-
-	astSelectorExpr, ok := fieldType.(*ast.SelectorExpr)
-	if ok {
-		packageNameIdent, _ := astSelectorExpr.X.(*ast.Ident)
-		return packageNameIdent.Name + "." + astSelectorExpr.Sel.Name
-	}
-
-	return fmt.Sprint(fieldType)
+	return internalTypes.TypeAsString(fieldType)
 }
 
 func parseOverrideStructTag(astField *ast.Field) (renderedStructName string) {
@@ -1621,19 +1587,19 @@ func (p *parser) debugf(format string, args ...interface{}) {
 
 func (p *parser) genSchemaObjectID(pkgName, typeName string) string {
 	if p.schemaRegistry == nil {
-		p.schemaRegistry = newSchemaRegistry(p.OmitPackages)
-		p.KnownIDSchema = p.schemaRegistry.knownIDSchema
-		p.ApiSchemaNames = p.schemaRegistry.apiSchemaNames
+		p.schemaRegistry = internalSchema.NewRegistry(p.OmitPackages)
+		p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
+		p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
 	}
-	return p.schemaRegistry.genSchemaObjectID(pkgName, typeName)
+	return p.schemaRegistry.SchemaObjectID(pkgName, typeName)
 }
 
 func setNestedFieldSchemaProps(valuePrefix, typeAsString string, fieldSchema, structSchema *openapi.SchemaObject) {
 	if strings.HasPrefix(valuePrefix, "map") {
 		fieldSchema.Type = &objectType
-		fieldSchema.AdditionalProperties = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
+		fieldSchema.AdditionalProperties = &openapi.SchemaObject{Ref: openapi.SchemaRef(typeAsString)}
 	} else {
 		fieldSchema.Type = &arrayType
-		fieldSchema.Items = &openapi.SchemaObject{Ref: addSchemaRefLinkPrefix(typeAsString)}
+		fieldSchema.Items = &openapi.SchemaObject{Ref: openapi.SchemaRef(typeAsString)}
 	}
 }
