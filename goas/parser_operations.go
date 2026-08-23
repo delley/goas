@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -56,11 +57,11 @@ func (p *parser) parseOperation(pkgPath, pkgName string, astComments []*ast.Comm
 	operation := &openapi.OperationObject{
 		Responses: map[string]*openapi.ResponseObject{},
 	}
-	if !strings.HasPrefix(pkgPath, p.ModulePath) {
+	if !isWithinPath(p.ModulePath, pkgPath) {
 		// ignore this pkgName
 		// p.debugf("parseOperation ignores %s", pkgPath)
 		return nil
-	} else if p.HandlerPath != "" && !strings.HasPrefix(pkgPath, p.HandlerPath) {
+	} else if p.HandlerPath != "" && !isWithinPath(p.HandlerPath, pkgPath) {
 		return nil
 	}
 	if annotate.IsHidden(astComments, p.ShowHidden) {
@@ -121,6 +122,9 @@ func (p *parser) parseRouteComment(operation *openapi.OperationObject, comment s
 
 	route := spec.Path
 	method := spec.Method
+	if !supportedHTTPMethod(method) {
+		return fmt.Errorf("unsupported HTTP method %q", method)
+	}
 
 	pi, ok := p.OpenAPI.Paths[route]
 	if !ok || pi == nil {
@@ -149,6 +153,29 @@ func (p *parser) parseRouteComment(operation *openapi.OperationObject, comment s
 	}
 
 	return nil
+}
+
+func supportedHTTPMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut,
+		http.MethodDelete, http.MethodOptions, http.MethodHead, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWithinPath(parent, child string) bool {
+	parent, err := filepath.Abs(filepath.Clean(parent))
+	if err != nil {
+		return false
+	}
+	child, err = filepath.Abs(filepath.Clean(child))
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(parent, child)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 // routeAndMethodExist checks if a route and method combination already exists.

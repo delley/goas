@@ -162,6 +162,80 @@ func Test_parseRouteComment(t *testing.T) {
 	require.Error(t, duplicateError)
 }
 
+func Test_parseRouteCommentRejectsUnknownHTTPMethod(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+
+	operation := &openapi.OperationObject{Responses: openapi.ResponsesObject{}}
+	err = p.parseRouteComment(operation, "@Router /unknown [CONNECT]")
+
+	require.EqualError(t, err, `unsupported HTTP method "CONNECT"`)
+	require.NotContains(t, p.OpenAPI.Paths, "/unknown")
+}
+
+func Test_parseOperationDoesNotAcceptPathOutsideModule(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+
+	err = p.parseOperation(p.ModulePath+"-extra", "main", []*ast.Comment{{Text: "// @Route /outside [GET]"}})
+
+	require.NoError(t, err)
+	require.NotContains(t, p.OpenAPI.Paths, "/outside")
+}
+
+func Test_parseOperationDoesNotAcceptPathOutsideHandler(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+	p.HandlerPath = filepath.Join(p.ModulePath, "handlers")
+
+	err = p.parseOperation(p.HandlerPath+"-extra", "main", []*ast.Comment{{Text: "// @Route /outside-handler [GET]"}})
+
+	require.NoError(t, err)
+	require.NotContains(t, p.OpenAPI.Paths, "/outside-handler")
+}
+
+func Test_parseResponseCommentAppliesJSONTypeToSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		comment  string
+		wantType string
+	}{
+		{name: "object", comment: `200 object FooResponse "ok"`, wantType: ""},
+		{name: "array", comment: `200 array FooResponse "ok"`, wantType: "array"},
+		{name: "array with slice type", comment: `200 array []FooResponse "ok"`, wantType: "array"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p, err := setupParser()
+			require.NoError(t, err)
+			require.NoError(t, p.parse())
+			operation := &openapi.OperationObject{Responses: openapi.ResponsesObject{}}
+
+			err = p.parseResponseComment(p.ModulePath, "main", operation, test.comment)
+			require.NoError(t, err)
+			mediaType := operation.Responses["200"].Content[openapi.ContentTypeJson]
+			require.NotNil(t, mediaType)
+			if test.wantType == "" {
+				require.Nil(t, mediaType.Schema.Type)
+			} else {
+				require.NotNil(t, mediaType.Schema.Type)
+				require.Equal(t, test.wantType, *mediaType.Schema.Type)
+			}
+		})
+	}
+}
+
+func Test_parseResponseCommentWithoutPayloadHasNoContent(t *testing.T) {
+	p, err := setupParser()
+	require.NoError(t, err)
+	operation := &openapi.OperationObject{Responses: openapi.ResponsesObject{}}
+
+	err = p.parseResponseComment(p.ModulePath, "main", operation, `204 "No content"`)
+	require.NoError(t, err)
+	require.Empty(t, operation.Responses["204"].Content)
+}
+
 func Test_handleCompoundType(t *testing.T) {
 	t.Run("oneOf", func(t *testing.T) {
 		p, err := setupParser()

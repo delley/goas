@@ -213,10 +213,6 @@ func (p *parser) validateSchemaNames() error {
 	return p.schemaRegistry.ValidateSchemaNames()
 }
 
-
-
-
-
 func (p *parser) getPkgAst(pkgPath string) (map[string]*ast.Package, error) {
 	if p.resources == nil {
 		p.resources = newParseResources()
@@ -513,28 +509,35 @@ func (p *parser) parseResponseComment(pkgPath, pkgName string, operation *openap
 
 	if spec.GoType != "" {
 		goType := spec.GoType
+		var schema *openapi.SchemaObject
 		if strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[]") {
-			schema, err := p.parseSchemaObject(pkgPath, pkgName, goType, true)
+			schema, err = p.parseSchemaObject(pkgPath, pkgName, goType, true)
 			if err != nil {
 				p.debug("parseResponseComment: cannot parse goType", goType)
+				return err
 			}
-			responseObject.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{Schema: *schema}
 		} else {
-			// aqui mantém seu comportamento original (mesmo detalhe do matches[3]):
 			typeName, err := p.registerType(pkgPath, pkgName, goType)
 			if err != nil {
 				return err
 			}
 			if internalTypes.IsBasicGoType(typeName) {
-				responseObject.Content[openapi.ContentTypeText] = &openapi.MediaTypeObject{
-					Schema: openapi.SchemaObject{Type: &stringType},
-				}
+				schema = &openapi.SchemaObject{Type: &stringType}
 			} else {
-				responseObject.Content[openapi.ContentTypeJson] = &openapi.MediaTypeObject{
-					Schema: openapi.SchemaObject{Ref: openapi.SchemaRef(typeName)},
-				}
+				schema = &openapi.SchemaObject{Ref: openapi.SchemaRef(typeName)}
 			}
 		}
+		if spec.JSONType == "array" {
+			if schema.Type == nil || *schema.Type != arrayType {
+				itemSchema := *schema
+				schema = &openapi.SchemaObject{Type: &arrayType, Items: &itemSchema}
+			}
+		}
+		contentType := openapi.ContentTypeJson
+		if internalTypes.IsBasicGoType(goType) {
+			contentType = openapi.ContentTypeText
+		}
+		responseObject.Content[contentType] = &openapi.MediaTypeObject{Schema: *schema}
 	}
 	operation.Responses[status] = responseObject
 	return nil
