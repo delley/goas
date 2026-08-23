@@ -1,17 +1,32 @@
 name: build
+
 on:
-  [pull_request, push]
+  pull_request:
+  push:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     name: Test Go
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/setup-go@v2
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.15
-      - uses: actions/checkout@v2
-      - name: Install example dependencies
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test root module
+        run: go test ./...
+
+      - name: Build CLI
+        run: go build -o /tmp/goas ./cmd/goas
+
+      - name: Test example module
         working-directory: ./example
-        run: go install
-      - run: go test ./... -v
+        run: go test ./...
