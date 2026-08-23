@@ -46,7 +46,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.FooResponse"
+                  "$ref": "#/components/schemas/FooResponse"
                 }
               }
             }
@@ -75,7 +75,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.FooResponse"
+                  "$ref": "#/components/schemas/FooResponse"
                 }
               }
             }
@@ -96,7 +96,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/example.FooBody"
+                "$ref": "#/components/schemas/FooBody"
               }
             }
           },
@@ -110,7 +110,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.FooResponse"
+                  "$ref": "#/components/schemas/FooResponse"
                 }
               }
             }
@@ -137,7 +137,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.FooResponse"
+                  "$ref": "#/components/schemas/FooResponse"
                 }
               }
             }
@@ -196,10 +196,10 @@
               "schema": {
                 "oneOf": [
                   {
-                    "$ref": "#/components/schemas/example.FooPatchOperationSet"
+                    "$ref": "#/components/schemas/FooPatchOperationSet"
                   },
                   {
-                    "$ref": "#/components/schemas/example.FooMergePatch"
+                    "$ref": "#/components/schemas/FooMergePatch"
                   }
                 ]
               }
@@ -218,7 +218,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.InnerFoo"
+                  "$ref": "#/components/schemas/InnerFoo"
                 }
               }
             }
@@ -245,7 +245,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/example.FooResponse"
+                  "$ref": "#/components/schemas/FooResponse"
                 }
               }
             }
@@ -270,6 +270,17 @@
   },
   "components": {
     "schemas": {
+      "Animal": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "Birb": {
         "type": "object",
         "required": [
@@ -284,24 +295,13 @@
           }
         }
       },
-      "example.Animal": {
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        }
-      },
-      "example.BsonID": {
+      "BsonID": {
         "type": "string"
       },
-      "example.DoubleAlias": {
-        "$ref": "#/components/schemas/example.JsonMap"
+      "DoubleAlias": {
+        "$ref": "#/components/schemas/JsonMap"
       },
-      "example.Environment": {
+      "Environment": {
         "type": "object",
         "properties": {
           "name": {
@@ -309,14 +309,14 @@
           }
         }
       },
-      "example.FooBody": {
+      "FooBody": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string"
           },
           "Example": {
-            "$ref": "#/components/schemas/example.DoubleAlias"
+            "$ref": "#/components/schemas/DoubleAlias"
           },
           "required": {
             "type": "boolean"
@@ -333,7 +333,7 @@
           }
         }
       },
-      "example.FooMergePatch": {
+      "FooMergePatch": {
         "type": "object",
         "properties": {
           "count": {
@@ -342,7 +342,7 @@
           }
         }
       },
-      "example.FooPatchOperation": {
+      "FooPatchOperation": {
         "type": "object",
         "properties": {
           "op": {
@@ -356,22 +356,22 @@
           }
         }
       },
-      "example.FooPatchOperationSet": {
+      "FooPatchOperationSet": {
         "type": "object",
         "properties": {
           "operations": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/example.FooPatchOperation"
+              "$ref": "#/components/schemas/FooPatchOperation"
             }
           }
         }
       },
-      "example.FooResponse": {
+      "FooResponse": {
         "type": "object",
         "properties": {
           "bsonId": {
-            "$ref": "#/components/schemas/example.BsonID"
+            "$ref": "#/components/schemas/BsonID"
           },
           "id": {
             "type": "string"
@@ -385,7 +385,7 @@
             "format": "uuid"
           },
           "endDate": {
-            "$ref": "#/components/schemas/example.UnixMillis"
+            "$ref": "#/components/schemas/UnixMillis"
           },
           "count": {
             "type": "integer",
@@ -396,31 +396,31 @@
           "foo": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/example.InnerFoo"
+              "$ref": "#/components/schemas/InnerFoo"
             }
           },
           "environments": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/example.Environment"
+              "$ref": "#/components/schemas/Environment"
             }
           },
           "freeForm": {},
           "jsonMap": {
-            "$ref": "#/components/schemas/example.JsonMap"
+            "$ref": "#/components/schemas/JsonMap"
           },
           "doubleAlias": {
-            "$ref": "#/components/schemas/example.DoubleAlias"
+            "$ref": "#/components/schemas/DoubleAlias"
           },
           "interfaceBlah": {
-            "$ref": "#/components/schemas/example.InterfaceResponse"
+            "$ref": "#/components/schemas/InterfaceResponse"
           },
           "instruction": {
-            "$ref": "#/components/schemas/example.Instruction"
+            "$ref": "#/components/schemas/Instruction"
           },
           "bsonPtr": {
             "example": "blah blah blah",
-            "$ref": "#/components/schemas/example.BsonID"
+            "$ref": "#/components/schemas/BsonID"
           },
           "randomBool": {
             "type": "boolean",
@@ -434,11 +434,11 @@
             ]
           },
           "changeReturn": {
-            "$ref": "#/components/schemas/example.Instruction"
+            "$ref": "#/components/schemas/Instruction"
           }
         }
       },
-      "example.InnerFoo": {
+      "InnerFoo": {
         "type": "object",
         "properties": {
           "a": {
@@ -449,19 +449,19 @@
           }
         }
       },
-      "example.Instruction": {
+      "Instruction": {
         "type": "object",
         "additionalProperties": {}
       },
-      "example.InterfaceResponse": {
+      "InterfaceResponse": {
         "type": "object",
         "additionalProperties": {}
       },
-      "example.JsonMap": {
+      "JsonMap": {
         "type": "object",
         "additionalProperties": {}
       },
-      "example.UnixMillis": {
+      "UnixMillis": {
         "type": "integer",
         "format": "int64"
       }
