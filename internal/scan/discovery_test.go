@@ -112,4 +112,3 @@ func main() {
 		t.Fatal("expected at least one package (root) from temporary module")
 	}
 }
-

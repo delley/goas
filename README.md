@@ -8,7 +8,11 @@ The project is based on
 
 Generate [OpenAPI Specification](https://swagger.io/specification) json file with comments in Go.
 
-The public contract is intentionally small: the root package exposes only the generation facade and compatibility helpers, while parsing, schema resolution, and package discovery live under internal packages. This keeps the OpenAPI model independent from orchestration and avoids parallel registries.
+The public contract is intentionally small: the root package exposes the generation facade and a single legacy compatibility helper, while parsing, schema resolution, and package discovery live under internal packages. This keeps the OpenAPI model independent from orchestration and avoids parallel registries.
+
+## Public API and compatibility
+
+The supported public surface is the `Generator` API (`New()`, `Generate()`, and `GenerateTo()`) plus the `Options` configuration type. `NewParser` remains exported for source compatibility with older integrations, but it is deliberately marked as a legacy compatibility entry point and should not be used in new code. The underlying parser value is intentionally opaque because it is an internal implementation detail rather than a supported public type.
 
 ## Limit
 - Only support go module.
