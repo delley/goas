@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/delley/goas/internal/buildselect"
 	"github.com/delley/goas/internal/load"
 	"github.com/delley/goas/internal/scan"
 	module "golang.org/x/mod/modfile"
@@ -14,7 +15,12 @@ import (
 // parseModule discovers all packages in the module path and registers them.
 func (p *parser) parseModule() error {
 	moduleCtx := &load.ModuleContext{ModulePath: p.ModulePath, ModuleName: p.ModuleName}
-	pkgSet, err := scan.DiscoverPackages(moduleCtx)
+	selector := p.resources.selector
+	if selector == nil {
+		selector = buildselect.New()
+		p.resources.selector = selector
+	}
+	pkgSet, err := scan.DiscoverPackagesWithSelector(moduleCtx, selector)
 	if err != nil {
 		return err
 	}

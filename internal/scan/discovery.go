@@ -1,11 +1,13 @@
 package scan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/delley/goas/internal/buildselect"
 	"github.com/delley/goas/internal/load"
 )
 
@@ -21,8 +23,15 @@ type PackageSet struct {
 }
 
 func DiscoverPackages(ctx *load.ModuleContext) (*PackageSet, error) {
+	return DiscoverPackagesWithSelector(ctx, buildselect.New())
+}
+
+func DiscoverPackagesWithSelector(ctx *load.ModuleContext, selector *buildselect.Selector) (*PackageSet, error) {
 	if ctx == nil {
 		return nil, nil
+	}
+	if selector == nil {
+		return nil, fmt.Errorf("build selector is nil")
 	}
 
 	result := &PackageSet{Packages: []Package{}}
@@ -40,8 +49,29 @@ func DiscoverPackages(ctx *load.ModuleContext) (*PackageSet, error) {
 		if strings.HasPrefix(dir, ".") || dir == "vendor" || dir == "node_modules" {
 			return filepath.SkipDir
 		}
-		fns, err := filepath.Glob(filepath.Join(path, "*.go"))
-		if len(fns) == 0 || err != nil {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		selected := false
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			matches, err := selector.MatchFile(path, info)
+			if err != nil {
+				return err
+			}
+			if matches {
+				selected = true
+				break
+			}
+		}
+		if !selected {
 			return nil
 		}
 

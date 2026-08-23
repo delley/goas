@@ -1,11 +1,13 @@
 package scan
 
 import (
+	"go/build"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/delley/goas/internal/buildselect"
 	"github.com/delley/goas/internal/load"
 )
 
@@ -113,7 +115,7 @@ func main() {
 	}
 }
 
-func TestDiscoverPackages_IncludesBuildExcludedPackageBaseline(t *testing.T) {
+func TestDiscoverPackages_IgnoresBuildExcludedPackage(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
 		t.Fatalf("failed to create go.mod: %v", err)
@@ -145,8 +147,91 @@ package conditional
 
 	for _, pkg := range set.Packages {
 		if pkg.Path == conditionalDir {
-			return
+			t.Fatalf("discovered build-excluded package %q", conditionalDir)
 		}
 	}
-	t.Fatalf("expected build-excluded package %q in baseline discovery", conditionalDir)
+}
+
+func TestDiscoverPackages_SelectsFilesForBuildContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("failed to create go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("failed to create main.go: %v", err)
+	}
+
+	platformDir := filepath.Join(tmpDir, "platform")
+	if err := os.Mkdir(platformDir, 0755); err != nil {
+		t.Fatalf("failed to create platform package: %v", err)
+	}
+	files := map[string]string{
+		"platform_linux.go":   "package platform\n",
+		"platform_windows.go": "package platform\n",
+		"platform_test.go":    "package platform\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(platformDir, name), []byte(contents), 0644); err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+	}
+
+	ctx, err := load.ResolveModuleContext(tmpDir, "", "", "")
+	if err != nil {
+		t.Fatalf("ResolveModuleContext returned error: %v", err)
+	}
+	linux := buildselect.NewWithContext(build.Context{GOOS: "linux", GOARCH: "amd64"})
+	linuxSet, err := DiscoverPackagesWithSelector(ctx, linux)
+	if err != nil {
+		t.Fatalf("linux discovery returned error: %v", err)
+	}
+	if !containsPackage(linuxSet, platformDir) {
+		t.Fatalf("expected platform package for linux")
+	}
+
+	windows := buildselect.NewWithContext(build.Context{GOOS: "windows", GOARCH: "amd64"})
+	windowsSet, err := DiscoverPackagesWithSelector(ctx, windows)
+	if err != nil {
+		t.Fatalf("windows discovery returned error: %v", err)
+	}
+	if !containsPackage(windowsSet, platformDir) {
+		t.Fatalf("expected platform package for windows")
+	}
+}
+
+func TestDiscoverPackages_IgnoresTestOnlyPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("failed to create go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("failed to create main.go: %v", err)
+	}
+	testOnlyDir := filepath.Join(tmpDir, "testonly")
+	if err := os.Mkdir(testOnlyDir, 0755); err != nil {
+		t.Fatalf("failed to create test-only package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(testOnlyDir, "only_test.go"), []byte("package testonly\n"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	ctx, err := load.ResolveModuleContext(tmpDir, "", "", "")
+	if err != nil {
+		t.Fatalf("ResolveModuleContext returned error: %v", err)
+	}
+	set, err := DiscoverPackages(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverPackages returned error: %v", err)
+	}
+	if containsPackage(set, testOnlyDir) {
+		t.Fatalf("discovered test-only package %q", testOnlyDir)
+	}
+}
+
+func containsPackage(set *PackageSet, path string) bool {
+	for _, pkg := range set.Packages {
+		if pkg.Path == path {
+			return true
+		}
+	}
+	return false
 }

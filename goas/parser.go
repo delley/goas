@@ -14,6 +14,7 @@ import (
 
 	"github.com/delley/goas/internal/annotate"
 	astpkg "github.com/delley/goas/internal/ast"
+	"github.com/delley/goas/internal/buildselect"
 	"github.com/delley/goas/internal/desc"
 	internalImports "github.com/delley/goas/internal/imports"
 	"github.com/delley/goas/internal/load"
@@ -71,12 +72,18 @@ type pkg = scan.Package
 type parseResources struct {
 	astCache       *astpkg.PackageCache
 	importRegistry *internalImports.Registry
+	selector       *buildselect.Selector
 }
 
-func newParseResources() *parseResources {
+func newParseResources(selectors ...*buildselect.Selector) *parseResources {
+	selector := buildselect.New()
+	if len(selectors) > 0 && selectors[0] != nil {
+		selector = selectors[0]
+	}
 	return &parseResources{
-		astCache:       astpkg.NewPackageCache(),
+		astCache:       astpkg.NewPackageCacheWithSelector(selector),
 		importRegistry: internalImports.NewRegistry(),
+		selector:       selector,
 	}
 }
 
@@ -115,7 +122,7 @@ func newParserContext(ctx context.Context, modulePath, mainFilePath, handlerPath
 		ShowHidden:    showHidden,
 		FileRefPath:   descriptionRefPath,
 	}
-	p.resources = newParseResources()
+	p.resources = newParseResources(buildselect.New())
 	p.schemaRegistry = internalSchema.NewRegistry(omitPackages)
 	p.KnownIDSchema = p.schemaRegistry.KnownIDSchema
 	p.ApiSchemaNames = p.schemaRegistry.ApiSchemaNames
@@ -219,7 +226,7 @@ func (p *parser) validateSchemaNames() error {
 
 func (p *parser) getPkgAst(pkgPath string) (map[string]*ast.Package, error) {
 	if p.resources == nil {
-		p.resources = newParseResources()
+		p.resources = newParseResources(buildselect.New())
 	}
 	return p.resources.astCache.GetPackageAST(pkgPath)
 }
@@ -240,7 +247,7 @@ func (p *parser) parseAPIs() error {
 
 func (p *parser) parseImportStatements() error {
 	if p.resources == nil {
-		p.resources = newParseResources()
+		p.resources = newParseResources(buildselect.New())
 	}
 	for i := range p.KnownPkgs {
 		pkgPath := p.KnownPkgs[i].Path

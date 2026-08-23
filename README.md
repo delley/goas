@@ -312,6 +312,13 @@ The `go run ../cmd/goas` form is not valid from inside the `example` module beca
 |`--omit-packages`|`false`|Omit packages from schema names|
 |`--show-hidden`|`false`|Include paths in hidden packages|
 
+Description references using `$ref:` may point to local files or HTTP(S)
+URLs. HTTP(S) references use a 30-second timeout when the generation context
+has no deadline and are limited to 1 MiB responses; non-2xx responses and
+other URL schemes fail generation. Local `file://` references are resolved
+under `--file-ref-path`; paths and symlinks that escape that directory are
+rejected.
+
 ## Local Development
 
 ### Unit tests
