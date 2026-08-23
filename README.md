@@ -1,7 +1,6 @@
 # goas
 The project is based on  
 - [yvasiyarov/swagger](https://github.com/yvasiyarov/swagger) repository.  
-- [uudashr/go-module](https://github.com/uudashr/go-module) repository. (currently deprecated)
 - [mikunalpha/goas](https://github.com/mikunalpha/goas) repository.
 - [nicocesar/goas](https://github.com/nicocesar/goas) repository.
 - [launchdarkly/goas](https://github.com/launchdarkly/goas) repository. (currently archived)
@@ -353,3 +352,7 @@ The module path is the base for relative `--main-file-path`, `--handler-path` an
 `GOMODCACHE` (`go env GOMODCACHE`); the cache directory does not need to exist when
 the generator starts. A cancelled generation context returns `context.Canceled` or
 `context.DeadlineExceeded` and does not write output.
+
+## Historical note
+
+Earlier versions of the project used the [uudashr/go-module](https://github.com/uudashr/go-module) repository. The current implementation uses the Go toolchain's built-in module support and no longer depends on it.
